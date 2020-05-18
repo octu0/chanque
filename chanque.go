@@ -1,20 +1,71 @@
 package chanque
 
+import(
+  "time"
+)
+
+type PanicType uint8
+const(
+  PanicTypeEnqueue PanicType = iota + 1
+  PanicTypeDequeue
+  PanicTypeClose
+)
+
+type PanicHandler func(PanicType, interface{}, *bool)
+
 type Queue struct {
-  ch chan interface{}
+  ch         chan interface{}
+  pncHandler PanicHandler
 }
 
 func New(c int) *Queue {
-  return &Queue{make(chan interface{}, c)}
+  return &Queue{
+    ch: make(chan interface{}, c),
+  }
+}
+
+func (q *Queue) PanicHandler(handler PanicHandler) {
+  q.pncHandler = handler
+}
+
+func (q *Queue) Close() (closed bool) {
+  defer func(){
+    if rcv := recover(); rcv != nil {
+      if q.pncHandler != nil {
+        q.pncHandler(PanicTypeClose, rcv, &closed)
+      }
+    }
+  }()
+  close(q.ch)
+  closed = true
+  return
 }
 
 // blocking enqueue
-func (q *Queue) Enqueue(val interface{}) {
+func (q *Queue) Enqueue(val interface{}) (write bool) {
+  defer func(){
+    if rcv := recover(); rcv != nil {
+      if q.pncHandler != nil {
+        q.pncHandler(PanicTypeEnqueue, rcv, &write)
+      }
+    }
+  }()
+
   q.ch <-val
+  write = true
+  return
 }
 
 // non-blocking enqueue
 func (q *Queue) EnqueueNB(val interface{}) (write bool) {
+  defer func(){
+    if rcv := recover(); rcv != nil {
+      if q.pncHandler != nil {
+        q.pncHandler(PanicTypeEnqueue, rcv, &write)
+      }
+    }
+  }()
+
   select {
   case q.ch <-val:
     write = true
@@ -39,14 +90,22 @@ func (q *Queue) EnqueueRetry(val interface{}, retryInterval time.Duration, retry
 }
 
 // blocking dequeue
-func (q *Queue) Dequeue() interface{} {
-  return <-q.ch
+func (q *Queue) Dequeue() (val interface{}, found bool) {
+  defer func(){
+    if rcv := recover(); rcv != nil {
+      if q.pncHandler != nil {
+        q.pncHandler(PanicTypeDequeue, rcv, &found)
+      }
+    }
+  }()
+  val, found = <-q.ch, true
+  return
 }
 
 // non-blocking dequeue
 func (q *Queue) DequeueNB() (val interface{}, found bool) {
   select {
-  case v = <-q.ch:
+  case v := <-q.ch:
     val, found = v, true
   default:
     val, found = nil, false

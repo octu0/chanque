@@ -22,6 +22,8 @@ import(
 
 func main(){
   que1 := chanque.New(10)
+  defer que1.Close()
+
   go func(){
     for {
       val := que1.Dequeue()
@@ -33,6 +35,12 @@ func main(){
   }
 
   que2 := chanque.New(10)
+  que2.PanicHandler(func(rcv interface{}, ret *bool) {
+    switch err.(type) {
+    case error:
+      fmt.Println("panic occurred")
+    }
+  })
   if ok := que2.EnqueueNB("world w/ non-blocking enqueue"); ok {
     fmt.Println("enqueue-ed")
   }
@@ -42,11 +50,13 @@ func main(){
 ### Functions
 
 ```
-Enqueue(interface{})
-EnqueueNB(interface{})
-EnqueueRetry(interface{}, time.Duration, int)
+New(capacity int) *Queue
 
-Dequeue() interface{}
-DequeueNB() (interface{}, bool)
-DequeueRetry(time.Duration, int) (interface{}, bool)
+Enqueue(value interface{}) (written bool)
+EnqueueNB(value interface{}) (written bool)
+EnqueueRetry(value interface{}, interval time.Duration, retry int) (written bool)
+
+Dequeue() (value interface{}, found bool)
+DequeueNB() (value interface{}, found bool)
+DequeueRetry(interval time.Duration, retry int) (value interface{}, found bool)
 ```
