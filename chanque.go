@@ -98,7 +98,7 @@ func (q *Queue) Dequeue() (val interface{}, found bool) {
       }
     }
   }()
-  val, found = <-q.ch, true
+  val, found = <-q.ch
   return
 }
 
