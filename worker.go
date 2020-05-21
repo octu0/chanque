@@ -24,6 +24,7 @@ type defaultWorker struct {
   cancel   context.CancelFunc
   executor *Executor
 }
+// run background
 func NewDefaultWorker(handler WorkerHandler) *defaultWorker {
   w         := new(defaultWorker)
   w.queue    = NewQueue(0)
@@ -51,11 +52,13 @@ func (w *defaultWorker) Run(parent context.Context) {
     }
   }(ctx))
 }
+// release channels and executor goroutine
 func (w *defaultWorker) Shutdown() {
   w.cancel()
   w.queue.Close()
   w.executor.Release()
 }
+// enqueue parameter w/ blocking until handler running
 func (w *defaultWorker) Enqueue(param interface{}) {
   w.queue.Enqueue(param)
 }
@@ -79,20 +82,24 @@ var(
 type bufferWorker struct {
   defaultWorker
 }
-func NewBufferWorker(handler WorkerHandler, workerSize int) *bufferWorker {
-  if workerSize < 2 {
-    workerSize = 2
+func NewBufferWorker(handler WorkerHandler, minWorker, maxWorker int) *bufferWorker {
+  if minWorker < 2 {
+    minWorker = 2
+  }
+  if maxWorker < minWorker {
+    maxWorker = minWorker
   }
 
   w         := new(bufferWorker)
   w.queue    = NewQueue(0)
   w.handler  = handler
-  w.executor = CreateExecutor(workerSize, workerSize * 2)
+  w.executor = CreateExecutor(minWorker, maxWorker)
   return w
 }
 func (w *bufferWorker) PanicHandler(handler PanicHandler) {
   w.queue.PanicHandler(handler)
 }
+// run background
 func (w *bufferWorker) Run(parent context.Context) {
   if parent == nil {
     parent = context.Background()
@@ -110,11 +117,13 @@ func (w *bufferWorker) Run(parent context.Context) {
     }
   }(ctx))
 }
+// release channels and executor goroutine
 func (w *bufferWorker) Shutdown() {
   w.cancel()
   w.queue.Close()
   w.executor.Release()
 }
+// enqueue parameter w/ non-blocking until capacity
 func (w *bufferWorker) Enqueue(param interface{}) {
   w.queue.Enqueue(param)
 }

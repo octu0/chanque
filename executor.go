@@ -72,6 +72,7 @@ func (e *Executor) increRunning() {
 func (e *Executor) decreRunning() {
   atomic.AddInt32(&e.runningNum, -1)
 }
+// return num of running workers
 func (e *Executor) Running() int32 {
   return atomic.LoadInt32(&e.runningNum)
 }
@@ -81,6 +82,7 @@ func (e *Executor) increWorker() {
 func (e *Executor) decreWorker() {
   atomic.AddInt32(&e.workerNum, 1)
 }
+// return num of goroutines
 func (e *Executor) Workers() int32 {
   return atomic.LoadInt32(&e.workerNum)
 }
@@ -95,7 +97,8 @@ func (e *Executor) startOndemand() {
   }
   e.mutex.Unlock()
 }
-func (e *Executor) Submit(fn func()) {
+// enqueue job
+func (e *Executor) Submit(fn Job) {
   defer func(){
     if rcv := recover(); rcv != nil {
       e.callPanicHandler(PanicTypeEnqueue, rcv)
@@ -109,6 +112,7 @@ func (e *Executor) Submit(fn func()) {
   e.startOndemand()
   e.jobs.Enqueue(fn)
 }
+// release goroutines
 func (e *Executor) Release() {
   defer func(){
     if rcv := recover(); rcv != nil {
@@ -119,6 +123,7 @@ func (e *Executor) Release() {
   e.done.Close()
   e.jobs.Close()
 }
+// release goroutines and wait goroutine done
 func (e *Executor) ReleaseAndWait() {
   e.Release()
   e.wg.Wait()
