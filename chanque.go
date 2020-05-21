@@ -11,7 +11,10 @@ const(
   PanicTypeClose
 )
 
-type PanicHandler func(PanicType, interface{}, *bool)
+type PanicHandler func(PanicType, interface{})
+func defaultPanicHandler(pt PanicType, rcv interface{}) {
+  log.Printf("warn: [recover] %s panic occurred %v stack %s", pt, rcv, string(debug.Stack()))
+}
 
 type Queue struct {
   ch         chan interface{}
@@ -28,14 +31,20 @@ func (q *Queue) PanicHandler(handler PanicHandler) {
   q.pncHandler = handler
 }
 
+func (q *Queue) Chan() <-chan interface{} {
+  return q.ch
+}
+
 func (q *Queue) Close() (closed bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
       if q.pncHandler != nil {
-        q.pncHandler(PanicTypeClose, rcv, &closed)
+        q.pncHandler(PanicTypeClose, rcv)
       }
+      closed = false
     }
   }()
+
   close(q.ch)
   closed = true
   return
@@ -46,8 +55,9 @@ func (q *Queue) Enqueue(val interface{}) (write bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
       if q.pncHandler != nil {
-        q.pncHandler(PanicTypeEnqueue, rcv, &write)
+        q.pncHandler(PanicTypeEnqueue, rcv)
       }
+      write = false
     }
   }()
 
@@ -61,8 +71,9 @@ func (q *Queue) EnqueueNB(val interface{}) (write bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
       if q.pncHandler != nil {
-        q.pncHandler(PanicTypeEnqueue, rcv, &write)
+        q.pncHandler(PanicTypeEnqueue, rcv)
       }
+      write = false
     }
   }()
 
@@ -94,10 +105,12 @@ func (q *Queue) Dequeue() (val interface{}, found bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
       if q.pncHandler != nil {
-        q.pncHandler(PanicTypeDequeue, rcv, &found)
+        q.pncHandler(PanicTypeDequeue, rcv)
       }
+      found = false
     }
   }()
+
   val, found = <-q.ch
   return
 }
