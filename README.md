@@ -64,7 +64,8 @@ import(
 )
 
 func main(){
-  exec := chanque.CreateExecutor(1, 2) // minWorker 1 maxWorker 3
+  // minWorker 1 maxWorker 2 
+  exec := chanque.CreateExecutor(1, 2) 
   defer exec.Release()
 
   exec.Submit(func(){
@@ -81,6 +82,25 @@ func main(){
   exec.Submit(func(){
     fmt.Println("job3")
   })
+
+  // Generate goroutines on demand up to the maximum number of workers.
+  // Submit does not block up to the size of MaxCapacity
+  // Workers that are not running are recycled to minWorker at the time of ReduceInterval.
+  exec2 := chanque.CreateExecutor(10, 50,
+    chanque.ExecutorMaxCapaticy(1000),
+    chanque.ExecutorReducderInterval(60 * time.Second),
+  )
+  defer exec2.Release()
+
+  for i := 0; i < 100; i += 1 {
+    exec2.Submit(func(i id) func() {
+      return func() {
+        fmt.Println("heavy process", id)
+        time.Sleep(100 * time.Millisecond)
+        fmt.Println("done process", id)
+      }
+    }(i))
+  }
 }
 ```
 

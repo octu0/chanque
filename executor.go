@@ -8,19 +8,48 @@ import(
 
 type Job func()
 
-type Executor struct {
-  mutex        *sync.Mutex
-  wg           *sync.WaitGroup
-  jobs         *Queue
-  done         *Queue
-  minWorker    int
-  maxWorker    int
-  panicHandler PanicHandler
-  runningNum   int32
-  workerNum    int32
+type ExecutorOption func(*Executor)
+
+var(
+  defaultReducerInterval = 10 * time.Second
+)
+
+func ExecutorPanicHandler(handler PanicHandler) ExecutorOption {
+  return func(e *Executor) {
+    e.panicHandler = handler
+  }
+}
+func ExecutorReducderInterval(interval time.Duration) ExecutorOption {
+  return func(e *Executor) {
+    e.reducerInterval = interval
+  }
+}
+func ExecutorMaxCapacity(capacity int) ExecutorOption {
+  return func(e *Executor) {
+    e.maxCapacity = capacity
+  }
 }
 
-func CreateExecutor(minWorker, maxWorker int) *Executor {
+type Executor struct {
+  mutex           *sync.Mutex
+  wg              *sync.WaitGroup
+  jobs            *Queue
+  done            *Queue
+  minWorker       int
+  maxWorker       int
+  maxCapacity     int
+  panicHandler    PanicHandler
+  reducerInterval time.Duration
+  runningNum      int32
+  workerNum       int32
+}
+
+func CreateExecutor(minWorker, maxWorker int, opts ...ExecutorOption) *Executor {
+  e := new(Executor)
+  for _, opt := range opts {
+    opt(e)
+  }
+
   if minWorker < 1 {
     minWorker = 0
   }
@@ -30,15 +59,23 @@ func CreateExecutor(minWorker, maxWorker int) *Executor {
   if maxWorker < minWorker {
     maxWorker = minWorker
   }
+  e.minWorker = minWorker
+  e.maxWorker = maxWorker
 
-  e             := new(Executor)
+  if e.maxCapacity < 1 {
+    e.maxCapacity = maxWorker
+  }
+  if e.panicHandler == nil {
+    e.panicHandler = defaultPanicHandler
+  }
+  if e.reducerInterval < 1 {
+    e.reducerInterval = defaultReducerInterval
+  }
+
   e.mutex        = new(sync.Mutex)
   e.wg           = new(sync.WaitGroup)
-  e.jobs         = NewQueue(maxWorker)
+  e.jobs         = NewQueue(e.maxCapacity)
   e.done         = NewQueue(0)
-  e.minWorker    = minWorker
-  e.maxWorker    = maxWorker
-  e.panicHandler = defaultPanicHandler
   e.runningNum   = int32(0)
   e.workerNum    = int32(0)
   e.initWorker()
@@ -136,7 +173,7 @@ func (e *Executor) healthloop(done *Queue, jobs *Queue) {
     }
   }()
 
-  ticker := time.NewTicker(10 * time.Second)
+  ticker := time.NewTicker(e.reducerInterval)
   defer ticker.Stop()
 
   for {
