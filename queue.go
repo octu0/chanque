@@ -4,26 +4,15 @@ import(
   "time"
 )
 
-type PanicType uint8
-const(
-  PanicTypeEnqueue PanicType = iota + 1
-  PanicTypeDequeue
-  PanicTypeClose
-)
-
-type PanicHandler func(PanicType, interface{})
-func defaultPanicHandler(pt PanicType, rcv interface{}) {
-  log.Printf("warn: [recover] %s panic occurred %v stack %s", pt, rcv, string(debug.Stack()))
-}
-
 type Queue struct {
   ch         chan interface{}
   pncHandler PanicHandler
 }
 
-func New(c int) *Queue {
+func NewQueue(c int) *Queue {
   return &Queue{
-    ch: make(chan interface{}, c),
+    ch:         make(chan interface{}, c),
+    pncHandler: defaultPanicHandler,
   }
 }
 

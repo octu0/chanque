@@ -7,7 +7,7 @@ import(
 
 func TestBlockingEnqueue(t *testing.T) {
   done1  := make(chan struct{})
-  queue1 := New(0)
+  queue1 := NewQueue(0)
 
   go func(){
     queue1.Enqueue(struct{}{})
@@ -24,7 +24,7 @@ func TestBlockingEnqueue(t *testing.T) {
   }
 
   done2  := make(chan struct{})
-  queue2 := New(1)
+  queue2 := NewQueue(1)
 
   go func(){
     queue2.Enqueue(struct{}{})
@@ -43,7 +43,7 @@ func TestBlockingEnqueue(t *testing.T) {
 
 func TestBlockingEnqueueNB(t *testing.T) {
   done1 := make(chan struct{})
-  queue1 := New(0)
+  queue1 := NewQueue(0)
   go func() {
     queue1.EnqueueNB(struct{}{})
     done1 <-struct{}{}
@@ -58,7 +58,7 @@ func TestBlockingEnqueueNB(t *testing.T) {
   }
 
   done2 := make(chan struct{})
-  queue2 := New(1)
+  queue2 := NewQueue(1)
   go func() {
     queue2.EnqueueNB(struct{}{})
     done2 <-struct{}{}
@@ -78,7 +78,7 @@ func TestBlockingEnqueueWithBlockingDequeue(t *testing.T) {
   done2  := make(chan struct{})
 
   value  := "pre value"
-  queue  := New(0)
+  queue  := NewQueue(0)
   go func() {
     <-done1
     v, ok := queue.Dequeue()
@@ -107,8 +107,8 @@ func TestBlockingEnqueueWithBlockingDequeue(t *testing.T) {
 func TestRecoveryHandlerEnqueue(t *testing.T) {
   done  := make(chan struct{})
   value := "not panic run"
-  queue := New(0)
-  queue.PanicHandler(func(pt PanicType, err interface{}, ret *bool) {
+  queue := NewQueue(0)
+  queue.PanicHandler(func(pt PanicType, err interface{}) {
     if pt != PanicTypeEnqueue {
       t.Errorf("not enqueue panic %v", pt)
     }
@@ -140,8 +140,8 @@ func TestRecoveryHandlerEnqueue(t *testing.T) {
 }
 func TestRecoveryHandlerSendByClosedChannel(t *testing.T) {
   value := "not panic run"
-  queue := New(0)
-  queue.PanicHandler(func(pt PanicType, err interface{}, ret *bool) {
+  queue := NewQueue(0)
+  queue.PanicHandler(func(pt PanicType, err interface{}) {
     if pt != PanicTypeEnqueue {
       t.Errorf("not enqueue panic %v", pt)
     }
@@ -166,8 +166,8 @@ func TestRecoveryHandlerSendByClosedChannel(t *testing.T) {
 
 func TestRecoveryHandlerWithDoubleClose(t *testing.T) {
   qv := "not double close"
-  qc := New(0)
-  qc.PanicHandler(func(pt PanicType, err interface{}, ret *bool) {
+  qc := NewQueue(0)
+  qc.PanicHandler(func(pt PanicType, err interface{}) {
     if pt != PanicTypeClose {
       t.Errorf("not close panic %v", pt)
     }
