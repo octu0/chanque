@@ -63,7 +63,7 @@ func CreateExecutor(minWorker, maxWorker int, opts ...ExecutorOption) *Executor 
   e.maxWorker = maxWorker
 
   if e.maxCapacity < 1 {
-    e.maxCapacity = maxWorker
+    e.maxCapacity = 0
   }
   if e.panicHandler == nil {
     e.panicHandler = defaultPanicHandler
@@ -83,8 +83,9 @@ func CreateExecutor(minWorker, maxWorker int, opts ...ExecutorOption) *Executor 
 }
 func (e *Executor) initWorker() {
   for i := 0; i < e.minWorker; i += 1 {
+    e.increWorker()
     e.wg.Add(1)
-    go e.execloop(e.jobs)
+    go e.execloop(i, e.jobs)
   }
   e.wg.Add(1)
   go e.healthloop(e.done, e.jobs)
@@ -113,26 +114,26 @@ func (e *Executor) decreRunning() {
 func (e *Executor) Running() int32 {
   return atomic.LoadInt32(&e.runningNum)
 }
-func (e *Executor) increWorker() {
-  atomic.AddInt32(&e.workerNum, 1)
+func (e *Executor) increWorker() int32 {
+  return atomic.AddInt32(&e.workerNum, 1)
 }
-func (e *Executor) decreWorker() {
-  atomic.AddInt32(&e.workerNum, 1)
+func (e *Executor) decreWorker() int32 {
+  return atomic.AddInt32(&e.workerNum, -1)
 }
 // return num of goroutines
 func (e *Executor) Workers() int32 {
   return atomic.LoadInt32(&e.workerNum)
 }
 func (e *Executor) startOndemand() {
-  e.mutex.Lock()
-  next := int(e.Running() + 1)
+  next := int(e.increWorker())
   if e.minWorker < next {
-    if next < e.maxWorker {
+    if next <= e.maxWorker {
       e.wg.Add(1)
-      go e.execloop(e.jobs)
+      go e.execloop(next, e.jobs)
+      return
     }
   }
-  e.mutex.Unlock()
+  e.decreWorker()
 }
 // enqueue job
 func (e *Executor) Submit(fn Job) {
@@ -194,15 +195,13 @@ func (e *Executor) healthloop(done *Queue, jobs *Queue) {
     }
   }
 }
-func (e *Executor) execloop(jobs *Queue) {
+func (e *Executor) execloop(id int, jobs *Queue) {
   defer e.wg.Done()
   defer func(){
     if rcv := recover(); rcv != nil {
       e.callPanicHandler(PanicTypeDequeue, rcv)
     }
   }()
-
-  e.increWorker()
   defer e.decreWorker()
 
   for {
