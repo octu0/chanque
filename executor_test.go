@@ -108,6 +108,51 @@ func TestExecutorOption(t *testing.T) {
   }
 }
 
+func TestExecutorRunningAndWorker(t *testing.T) {
+  e1 := CreateExecutor(10, 10)
+  e2 := CreateExecutor(0, 10)
+  e3 := CreateExecutor(-1, 15)
+  e4 := CreateExecutor(10, 15, ExecutorMaxCapacity(0))
+  e5 := CreateExecutor(10, 15, ExecutorMaxCapacity(5))
+
+  time.Sleep(10 * time.Millisecond)
+
+  if e1.Running() != 0 {
+    t.Errorf("running should be 0")
+  }
+  if e1.Workers() != 10 {
+    t.Errorf("worker startup 10")
+  }
+
+  if e2.Running() != 0 {
+    t.Errorf("running should be 0")
+  }
+  if e2.Workers() != 0 {
+    t.Errorf("worker startup 0")
+  }
+
+  if e3.Running() != 0 {
+    t.Errorf("running should be 0")
+  }
+  if e3.Workers() != 0 {
+    t.Errorf("worker startup 0")
+  }
+
+  if e4.Running() != 0 {
+    t.Errorf("running should be 0")
+  }
+  if e4.Workers() != 10 {
+    t.Errorf("worker startup 10")
+  }
+
+  if e5.Running() != 0 {
+    t.Errorf("running should be 0")
+  }
+  if e5.Workers() != 10 {
+    t.Errorf("worker startup 10")
+  }
+}
+
 func TestExecutorOndemandStart(t *testing.T) {
   e := CreateExecutor(0, 1)
   defer func(){
