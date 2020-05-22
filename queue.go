@@ -77,15 +77,15 @@ func (q *Queue) EnqueueNB(val interface{}) (write bool) {
 }
 
 // retry w/ enqueue until channel can be written(waiting for channel to read)
-func (q *Queue) EnqueueRetry(val interface{}, retryInterval time.Duration, retryLimit int) (timeout bool) {
+func (q *Queue) EnqueueRetry(val interface{}, retryInterval time.Duration, retryLimit int) (write bool) {
   for i := 0; i < retryLimit; i += 1 {
     if q.EnqueueNB(val) {
-      timeout = false
+      write = true
       return
     }
     time.Sleep(retryInterval)
   }
-  timeout = true
+  write = false
   return
 }
 
