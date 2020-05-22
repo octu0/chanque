@@ -190,3 +190,100 @@ func TestRecoveryHandlerWithDoubleClose(t *testing.T) {
     t.Errorf("PanicHandler does not call(2)")
   }
 }
+
+func TestEnqueueRetryNoReader(t *testing.T) {
+  q := NewQueue(0)
+  write := q.EnqueueRetry("hello world", 1 * time.Millisecond, 10)
+  if write {
+    t.Errorf("queue has no reader => expect missing enqueue")
+  }
+}
+func TestEnqueueRetryDelayReader(t *testing.T) {
+  q := NewQueue(0)
+
+  latch := make(chan struct{})
+  enq := make(chan bool)
+  go func(c chan struct{}, r chan bool){
+    <-c
+    r <-q.EnqueueRetry("hello world2", 10 * time.Millisecond, 10)
+  }(latch, enq)
+
+  type pair struct {
+    val interface{}
+    ok  bool
+  }
+  deq := make(chan pair)
+  go func(c chan struct{}, r chan pair) {
+    c <-struct{}{} // start latch
+
+    time.Sleep(12 * time.Millisecond) // enqueue retry
+
+    val, ok := q.Dequeue()
+    r <-pair{val, ok}
+  }(latch, deq)
+
+  write := <-enq
+  p := <-deq
+
+  if write != true {
+    t.Errorf("enqueue should be succeed")
+  }
+  if p.ok != true {
+    t.Errorf("dequeue should be succeed")
+  }
+  if val, ok := p.val.(string); ok {
+    if val != "hello world2" {
+      t.Errorf("value != %s", val)
+    }
+  } else {
+    t.Errorf("not string value %v", p.val)
+  }
+}
+func TestDequeueRetryNoReader(t *testing.T) {
+  q := NewQueue(0)
+  _, ok := q.DequeueRetry(1 * time.Millisecond, 10)
+  if ok {
+    t.Errorf("queue has no writer => expect missing dequeue")
+  }
+}
+func TestDequeueRetryDelayWriter(t *testing.T) {
+  q := NewQueue(0)
+
+  type pair struct {
+    val interface{}
+    ok  bool
+  }
+  latch := make(chan struct{})
+  deq   := make(chan pair)
+  go func(c chan struct{}, r chan pair) {
+    <-c
+    val, ok := q.DequeueRetry(10 * time.Millisecond, 10)
+    r <-pair{val, ok}
+  }(latch, deq)
+
+  enq := make(chan bool)
+  go func(c chan struct{}, r chan bool) {
+    c <-struct{}{} // start latch
+
+    time.Sleep(12 * time.Millisecond) // dequeue retry
+
+    r <-q.Enqueue("hello world3")
+  }(latch, enq)
+
+  p := <-deq
+  write := <-enq
+
+  if p.ok != true {
+    t.Errorf("dequeue sould be succeed")
+  }
+  if val, ok := p.val.(string); ok {
+    if val != "hello world3" {
+      t.Errorf("value != %s", val)
+    }
+  } else {
+    t.Errorf("not string value %v", p.val)
+  }
+  if write != true {
+    t.Errorf("enqueue should be succeed")
+  }
+}
