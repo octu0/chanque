@@ -94,7 +94,7 @@ func main(){
   // Submit does not block up to the size of MaxCapacity
   // Workers that are not running are recycled to minWorker at the time of ReduceInterval.
   exec2 := chanque.CreateExecutor(10, 50,
-    chanque.ExecutorMaxCapaticy(1000),
+    chanque.ExecutorMaxCapacicy(1000),
     chanque.ExecutorReducderInterval(60 * time.Second),
   )
   defer exec2.Release()
@@ -115,7 +115,7 @@ func main(){
 
 Worker implementation for asynchronous execution, register WorkerHandler and execute it with Enqueue parameter.  
 Enqueue of parameter is blocked while WorkerHandler is running.  
-There is also a BufferWorker implementation that does not block during asynchronous execution.
+There is also a BufferWorker implementation that non-blocking enqueue during asynchronous execution.
 
 ```go
 import(
@@ -147,10 +147,52 @@ func main(){
 
   go func(){
     w2.Enqueue("hello")
-    w2.Enqueue("world") // non-blocking
+    w2.Enqueue("world") // non-blocking until free capacity
   }()
 }
+```
 
+### Pipeline
+
+Pipeline provides sequential asynchronous input and output.
+Execute func combination asynchronously
+
+```go
+import(
+  "fmt"
+  "time"
+  "context"
+  "github.com/octu0/chanque"
+)
+
+func main(){
+  calcFn := func(parameter interface{}) (interface{}, error) {
+    // heavy process
+    time.Sleep(1 * time.Second)
+
+    if val, ok := parameter.(int); ok {
+      return val * 2, nil
+    }
+    return -1, fmt.Errorf("invalid parameter")
+  }
+  outFn := func(paramter interface{}) error {
+    if val, ok := parameter.(int); ok {
+      fmt.Println("value =", val)
+      return nil
+    }
+    return fmt.Errorf("invalid parameter")
+  }
+
+  // minWorker 2 maxWorker 10
+  pipe := chanque.CreatePipeline(2, 10, calcFn, outFn,
+    PipelineMaxCapacity(100),
+  )
+
+  pipe.Enqueue(10)
+  pipe.Enqueue(20)
+  pipe.Enqueue(30)
+  pipe.ShutdownAndWait()
+}
 ```
 
 ## Functions
@@ -192,6 +234,20 @@ NewDefaultWorker(handler WorkerHandler)
 NewBufferWorker(handler WorkerHandler, minWorker, maxWorker int)
 
 func(Worker) Run(context.Context)
-func(Worker) Enqueue(parameter interface{})
+func(Worker) Enqueue(parameter interface{}) bool
 func(Worker) Shutdown()
 ```
+
+### type `Pipeline`
+
+```
+CreatePipeline(minWorker, maxWorker int, PipelineInputFunc, PipelineOutputFunc) *Pipeline
+
+func(*Pipeline) Enqueue(interface)
+func(*Pipeline) Shutdown()
+func(*Pipeline) ShutdownAndWait()
+```
+
+## License
+
+MIT, see LICENSE file for details.

@@ -2,13 +2,17 @@ package chanque
 
 import(
   "context"
+  "sync"
+  "sync/atomic"
 )
 
 type Worker interface {
   PanicHandler(PanicHandler)
   Run(context.Context)
   Shutdown()
-  Enqueue(interface{})
+  ShutdownAndWait()
+  Enqueue(interface{}) bool
+  CloseEnqueue()       bool
 }
 
 type WorkerHandler func(parameter interface{})
@@ -18,11 +22,18 @@ var(
   _ Worker = (*defaultWorker)(nil)
 )
 
+const(
+  workerEnqueueInit    int32 = 0
+  workerEnqueueClosed  int32 = 1
+)
+
 type defaultWorker struct {
   queue    *Queue
   handler  WorkerHandler
   cancel   context.CancelFunc
   executor *Executor
+  closed   int32
+  wg       *sync.WaitGroup
 }
 // run background
 func NewDefaultWorker(handler WorkerHandler) *defaultWorker {
@@ -30,6 +41,8 @@ func NewDefaultWorker(handler WorkerHandler) *defaultWorker {
   w.queue    = NewQueue(0)
   w.handler  = handler
   w.executor = CreateExecutor(1, 1)
+  w.closed   = workerEnqueueInit
+  w.wg       = new(sync.WaitGroup)
   return w
 }
 func (w *defaultWorker) PanicHandler(handler PanicHandler) {
@@ -46,6 +59,7 @@ func (w *defaultWorker) Run(parent context.Context) {
   }
   w.cancel = cancel
 
+  w.wg.Add(1)
   w.executor.Submit(func(c context.Context) Job {
     return func() {
       w.runloop(c)
@@ -54,21 +68,42 @@ func (w *defaultWorker) Run(parent context.Context) {
 }
 // release channels and executor goroutine
 func (w *defaultWorker) Shutdown() {
+  w.CloseEnqueue()
   w.cancel()
-  w.queue.Close()
   w.executor.Release()
 }
+func (w *defaultWorker) ShutdownAndWait() {
+  w.CloseEnqueue()
+  w.cancel()
+  w.wg.Wait()
+  w.executor.ReleaseAndWait()
+}
+func (w *defaultWorker) CloseEnqueue() bool {
+  if w.tryQueueClose() {
+    w.queue.Close()
+    return true
+  }
+  return false
+}
+func (w *defaultWorker) tryQueueClose() bool {
+  return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
+}
 // enqueue parameter w/ blocking until handler running
-func (w *defaultWorker) Enqueue(param interface{}) {
-  w.queue.Enqueue(param)
+func (w *defaultWorker) Enqueue(param interface{}) bool {
+  return w.queue.Enqueue(param)
 }
 func (w *defaultWorker) runloop(ctx context.Context) {
+  defer w.wg.Done()
   for {
     select {
     case <-ctx.Done():
       return
 
-    case param := <-w.queue.Chan():
+    case param, ok := <-w.queue.Chan():
+      if ok != true {
+        return
+      }
+
       w.handler(param)
     }
   }
@@ -82,6 +117,7 @@ var(
 type bufferWorker struct {
   defaultWorker
 }
+
 func NewBufferWorker(handler WorkerHandler, minWorker, maxWorker int) *bufferWorker {
   if minWorker < 2 {
     minWorker = 2
@@ -94,11 +130,15 @@ func NewBufferWorker(handler WorkerHandler, minWorker, maxWorker int) *bufferWor
   w.queue    = NewQueue(0)
   w.handler  = handler
   w.executor = CreateExecutor(minWorker, maxWorker)
+  w.closed   = workerEnqueueInit
+  w.wg       = new(sync.WaitGroup)
   return w
 }
+
 func (w *bufferWorker) PanicHandler(handler PanicHandler) {
   w.queue.PanicHandler(handler)
 }
+
 // run background
 func (w *bufferWorker) Run(parent context.Context) {
   if parent == nil {
@@ -111,21 +151,46 @@ func (w *bufferWorker) Run(parent context.Context) {
   }
   w.cancel = cancel
 
-  w.executor.Submit(func(c context.Context) Job {
+  boot := make(chan struct{})
+  w.wg.Add(1)
+  w.executor.Submit(func(c context.Context, b chan struct{}) Job {
     return func(){
+      b <-struct{}{}
       w.runloop(c)
     }
-  }(ctx))
+  }(ctx, boot))
+  <-boot
 }
+
 // release channels and executor goroutine
 func (w *bufferWorker) Shutdown() {
+  w.CloseEnqueue()
   w.cancel()
-  w.queue.Close()
   w.executor.Release()
 }
+
+func (w *bufferWorker) ShutdownAndWait() {
+  w.CloseEnqueue()
+  w.cancel()
+  w.wg.Wait()
+  w.executor.ReleaseAndWait()
+}
+
+func (w *bufferWorker) CloseEnqueue() bool {
+  if w.tryQueueClose() {
+    w.queue.Close()
+    return true
+  }
+  return false
+}
+
+func (w *bufferWorker) tryQueueClose() bool {
+  return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
+}
+
 // enqueue parameter w/ non-blocking until capacity
-func (w *bufferWorker) Enqueue(param interface{}) {
-  w.queue.Enqueue(param)
+func (w *bufferWorker) Enqueue(param interface{}) bool {
+  return w.queue.Enqueue(param)
 }
 func (w *bufferWorker) exec(parameters []interface{}, done func()) {
   defer done()
@@ -135,7 +200,10 @@ func (w *bufferWorker) exec(parameters []interface{}, done func()) {
   }
 }
 func (w *bufferWorker) runloop(ctx context.Context) {
+  defer w.wg.Done()
+
   chkqueue := NewQueue(1)
+  chkqueue.PanicHandler(noopPanicHandler)
   defer chkqueue.Close()
 
   check := func(c *Queue) Job {
@@ -166,7 +234,16 @@ func (w *bufferWorker) runloop(ctx context.Context) {
       buffer = buffer[len(buffer):]
       w.executor.Submit(genExec(queue, check))
 
-    case param :=<-w.queue.Chan():
+    case param, ok :=<-w.queue.Chan():
+      if ok != true {
+        if 0 < len(buffer) {
+          w.executor.Submit(genExec(buffer, func(){
+            /* nop done */
+          }))
+        }
+        return
+      }
+
       buffer = append(buffer, param)
       w.executor.Submit(check)
     }

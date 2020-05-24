@@ -28,3 +28,6 @@ type PanicHandler func(PanicType, interface{})
 func defaultPanicHandler(pt PanicType, rcv interface{}) {
   log.Printf("warn: [recover] panic(%s) occurred %v stack %s", pt, rcv, string(debug.Stack()))
 }
+func noopPanicHandler(PanicType, interface{}){
+  /* noop */
+}

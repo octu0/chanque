@@ -2,6 +2,7 @@ package chanque
 
 import(
   "time"
+  "context"
   "sync"
   "sync/atomic"
 )
@@ -34,7 +35,9 @@ type Executor struct {
   mutex           *sync.Mutex
   wg              *sync.WaitGroup
   jobs            *Queue
-  done            *Queue
+  ctx             context.Context
+  jobCancel       []context.CancelFunc
+  healthCancel    context.CancelFunc
   minWorker       int
   maxWorker       int
   maxCapacity     int
@@ -75,33 +78,37 @@ func CreateExecutor(minWorker, maxWorker int, opts ...ExecutorOption) *Executor 
   e.mutex        = new(sync.Mutex)
   e.wg           = new(sync.WaitGroup)
   e.jobs         = NewQueue(e.maxCapacity)
-  e.done         = NewQueue(0)
+  e.ctx          = context.Background()
+  e.jobCancel    = make([]context.CancelFunc, 0)
+  e.healthCancel = nil
   e.runningNum   = int32(0)
   e.workerNum    = int32(0)
+
+  e.jobs.PanicHandler(e.panicHandler)
+
   e.initWorker()
   return e
 }
 func (e *Executor) initWorker() {
+  e.mutex.Lock()
+  defer e.mutex.Unlock()
+
   for i := 0; i < e.minWorker; i += 1 {
     e.increWorker()
-    e.wg.Add(1)
-    go e.execloop(i, e.jobs)
-  }
-  e.wg.Add(1)
-  go e.healthloop(e.done, e.jobs)
-}
-func (e *Executor) PanicHandler(handler PanicHandler) {
-  e.mutex.Lock()
-  defer e.mutex.Unlock()
+    jctx, jcancel := context.WithCancel(e.ctx)
+    e.jobCancel = append(e.jobCancel, jcancel)
 
-  e.panicHandler = handler
-  e.jobs.PanicHandler(handler)
-  e.done.PanicHandler(handler)
+    e.wg.Add(1)
+    go e.execloop(jctx, e.jobs)
+  }
+
+  hctx, hcancel := context.WithCancel(e.ctx)
+  e.healthCancel = hcancel
+
+  e.wg.Add(1)
+  go e.healthloop(hctx, e.jobs)
 }
 func (e *Executor) callPanicHandler(pt PanicType, rcv interface{}) {
-  e.mutex.Lock()
-  defer e.mutex.Unlock()
-
   e.panicHandler(pt, rcv)
 }
 func (e *Executor) increRunning() {
@@ -128,8 +135,14 @@ func (e *Executor) startOndemand() {
   next := int(e.increWorker())
   if e.minWorker < next {
     if next <= e.maxWorker {
+      e.mutex.Lock()
+      defer e.mutex.Unlock()
+
       e.wg.Add(1)
-      go e.execloop(next, e.jobs)
+      jctx, jcancel := context.WithCancel(e.ctx)
+      e.jobCancel = append(e.jobCancel, jcancel)
+
+      go e.execloop(jctx, e.jobs)
       return
     }
   }
@@ -150,6 +163,12 @@ func (e *Executor) Submit(fn Job) {
   e.startOndemand()
   e.jobs.Enqueue(fn)
 }
+func (e *Executor) ForceStop() {
+  for _, cancel := range e.jobCancel {
+    cancel()
+  }
+}
+
 // release goroutines
 func (e *Executor) Release() {
   defer func(){
@@ -158,15 +177,30 @@ func (e *Executor) Release() {
     }
   }()
 
-  e.done.Close()
+  e.healthCancel()
   e.jobs.Close()
 }
-// release goroutines and wait goroutine done
 func (e *Executor) ReleaseAndWait() {
   e.Release()
   e.wg.Wait()
 }
-func (e *Executor) healthloop(done *Queue, jobs *Queue) {
+func (e *Executor) releaseJob(reduceSize int) {
+  e.mutex.Lock()
+  defer e.mutex.Unlock()
+
+  if reduceSize < 1 {
+    return
+  }
+
+  cancels := make([]context.CancelFunc, reduceSize)
+  copy(cancels, e.jobCancel[0 : reduceSize])
+  e.jobCancel = e.jobCancel[reduceSize:]
+
+  for _, cancel := range cancels {
+    cancel()
+  }
+}
+func (e *Executor) healthloop(ctx context.Context, jobs *Queue) {
   defer e.wg.Done()
   defer func(){
     if rcv := recover(); rcv != nil {
@@ -179,7 +213,7 @@ func (e *Executor) healthloop(done *Queue, jobs *Queue) {
 
   for {
     select {
-    case <-done.Chan():
+    case <-ctx.Done():
       return
 
     case <-ticker.C:
@@ -187,15 +221,12 @@ func (e *Executor) healthloop(done *Queue, jobs *Queue) {
       runningWorkerNum := e.Running()
       idleWorkers      := int(currentWorkerNum - runningWorkerNum)
       if e.minWorker < idleWorkers {
-        reduceSize := int(idleWorkers - e.minWorker)
-        for i := 0; i < reduceSize; i += 1 {
-          jobs.EnqueueNB(nil)
-        }
+        e.releaseJob(int(idleWorkers - e.minWorker))
       }
     }
   }
 }
-func (e *Executor) execloop(id int, jobs *Queue) {
+func (e *Executor) execloop(ctx context.Context, jobs *Queue) {
   defer e.wg.Done()
   defer func(){
     if rcv := recover(); rcv != nil {
@@ -206,11 +237,11 @@ func (e *Executor) execloop(id int, jobs *Queue) {
 
   for {
     select {
+    case <-ctx.Done():
+      return
+
     case job, ok := <-jobs.Chan():
       if ok != true {
-        return
-      }
-      if job == nil {
         return
       }
 

@@ -154,13 +154,12 @@ func TestExecutorRunningAndWorker(t *testing.T) {
 }
 
 func TestExecutorOndemandStart(t *testing.T) {
-  e := CreateExecutor(0, 1)
-  defer func(){
-    e.PanicHandler(func(pt PanicType, rcv interface{}){
+  e := CreateExecutor(0, 1,
+    ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
       /* nop */
-    })
-    e.Release()
-  }()
+    }),
+  )
+  defer e.Release()
 
   r1 := e.Running()
   w1 := e.Workers()
@@ -230,13 +229,12 @@ func TestExecutorOndemandStart(t *testing.T) {
   }
 }
 func TestExecutorOndemandStartUpto100(t *testing.T) {
-  e := CreateExecutor(0, 100)
-  defer func(){
-    e.PanicHandler(func(pt PanicType, rcv interface{}){
+  e := CreateExecutor(0, 100,
+    ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
       /* nop */
-    })
-    e.Release()
-  }()
+    }),
+  )
+  defer e.Release()
 
   r1 := e.Running()
   w1 := e.Workers()
@@ -325,14 +323,12 @@ func TestExecutorOndemandStartUpto100(t *testing.T) {
 }
 
 func TestExecutorSubmitBlocking(t *testing.T) {
-  e1 := CreateExecutor(0, 100)
-  defer func(){
-    e1.PanicHandler(func(pt PanicType, rcv interface{}){
+  e1 := CreateExecutor(0, 100,
+    ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
       /* nop */
-    })
-    e1.Release()
-  }()
-
+    }),
+  )
+  defer e1.Release()
 
   enqueue := make(chan struct{})
   for i := 0; i < 100; i += 1 {
@@ -386,13 +382,11 @@ func TestExecutorSubmitBlocking(t *testing.T) {
 func TestExecutorSubmitNonBlocking(t *testing.T) {
   e1 := CreateExecutor(0, 100,
     ExecutorMaxCapacity(50),
-  )
-  defer func(){
-    e1.PanicHandler(func(pt PanicType, rcv interface{}){
+    ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
       /* nop */
-    })
-    e1.Release()
-  }()
+    }),
+  )
+  defer e1.Release()
 
   enqueue := make(chan struct{})
   for i := 0; i < 100; i += 1 {
