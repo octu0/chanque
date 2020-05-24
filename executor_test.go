@@ -423,7 +423,7 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
   case <-time.After(10 * time.Millisecond):
     t.Errorf("free capacity")
   case <-done:
-    println("free capacity. submit non-blocking ok")
+    t.Log("free capacity. submit non-blocking ok")
   }
 
   for i := 0; i < 49; i += 1 {
@@ -458,7 +458,7 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
 
   select {
   case <-time.After(10 * time.Millisecond):
-    println("max capacity exceeded. submit blocking ok2")
+    t.Log("max capacity exceeded. submit blocking ok2")
   case <-done2:
     t.Errorf("submit should be blocked")
   }

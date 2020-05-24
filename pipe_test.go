@@ -42,7 +42,7 @@ func TestPipelineInOutParameter(t *testing.T) {
           if ok != true {
             t.Errorf("invalid result : %v", result)
           }
-          println("out ok", val)
+          t.Log("out ok", val)
         }
       },
       enq: func(t *testing.T, p *Pipeline){
@@ -71,7 +71,7 @@ func TestPipelineInOutParameter(t *testing.T) {
           if ok != true {
             t.Errorf("invalid result : %v", result)
           }
-          println("out ok", val)
+          t.Log("out ok", val)
         }
       },
       enq: func(t *testing.T, p *Pipeline){
@@ -104,7 +104,7 @@ func TestPipelineInOutParameter(t *testing.T) {
           if ok != true {
             t.Errorf("invalid result : %v", result)
           }
-          println("foo:", val.foo, "bar:", val.bar.quux)
+          t.Log("foo:", val.foo, "bar:", val.bar.quux)
         }
       },
       enq: func(t *testing.T, p *Pipeline){

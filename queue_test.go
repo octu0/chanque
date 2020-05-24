@@ -16,7 +16,7 @@ func TestBlockingEnqueue(t *testing.T) {
 
   select {
   case <-time.After(10 * time.Millisecond):
-    println("blocking enqueue ok1")
+    t.Log("blocking enqueue ok1")
     queue1.Close()
 
   case <-done1:
@@ -37,40 +37,44 @@ func TestBlockingEnqueue(t *testing.T) {
     t.Errorf("blocking enqueue: queue2 has free capacity")
 
   case <-done2:
-    println("blocking enqueue ok2")
+    t.Log("blocking enqueue ok2")
   }
 }
 
 func TestBlockingEnqueueNB(t *testing.T) {
-  done1 := make(chan struct{})
-  queue1 := NewQueue(0)
-  go func() {
-    queue1.EnqueueNB(struct{}{})
-    done1 <-struct{}{}
-  }()
-  select {
-  case <-time.After(10 * time.Millisecond):
-    queue1.Close()
-    t.Errorf("non-blocking enqueue: queue1 reached capacity but non-blocking call")
+  t.Run("size0", func(tt *testing.T){
+    done := make(chan struct{})
+    queue := NewQueue(0)
+    go func() {
+      queue.EnqueueNB(struct{}{})
+      done <-struct{}{}
+    }()
+    select {
+    case <-time.After(10 * time.Millisecond):
+      queue.Close()
+      tt.Errorf("non-blocking enqueue: queue1 reached capacity but non-blocking call")
 
-  case <-done1:
-    println("non blocking ok1")
-  }
+    case <-done:
+      tt.Log("non blocking ok1")
+    }
+  })
 
-  done2 := make(chan struct{})
-  queue2 := NewQueue(1)
-  go func() {
-    queue2.EnqueueNB(struct{}{})
-    done2 <-struct{}{}
-  }()
-  select {
-  case <-time.After(10 * time.Millisecond):
-    queue2.Close()
-    t.Errorf("non-blocking enqueue: queue2 has free capacity")
+  t.Run("size1", func(tt *testing.T) {
+    done  := make(chan struct{})
+    queue := NewQueue(1)
+    go func() {
+      queue.EnqueueNB(struct{}{})
+      done <-struct{}{}
+    }()
+    select {
+    case <-time.After(10 * time.Millisecond):
+      queue.Close()
+      tt.Errorf("non-blocking enqueue: queue2 has free capacity")
 
-  case <-done2:
-    println("non blocking ok2")
-  }
+    case <-done:
+      tt.Log("non blocking ok2")
+    }
+  })
 }
 
 func TestBlockingEnqueueWithBlockingDequeue(t *testing.T) {
@@ -274,7 +278,7 @@ func TestDequeueRetryDelayWriter(t *testing.T) {
   write := <-enq
 
   if p.ok != true {
-    t.Errorf("dequeue sould be succeed")
+    t.Errorf("dequeue should be succeed")
   }
   if val, ok := p.val.(string); ok {
     if val != "hello world3" {
