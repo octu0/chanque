@@ -2,10 +2,62 @@ package chanque
 
 import(
   "testing"
+  "sync"
+  "math/rand"
   "time"
   "fmt"
   "strings"
 )
+
+func TestPipelineSequencial(t *testing.T) {
+  rand.Seed(time.Now().UnixNano())
+
+  s := 30
+  a := make([]int, s)
+  b := make([]int, s)
+  m := new(sync.Mutex)
+  in := func(param interface{}) (interface{}, error) {
+    m.Lock()
+    defer m.Unlock()
+
+    time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
+
+    idx := param.(int)
+    a[idx] = idx
+    return idx, nil
+  }
+  out := func(result interface{}, err error) {
+    m.Lock()
+    defer m.Unlock()
+
+    time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
+
+    idx := result.(int)
+    b[idx] = idx
+  }
+  p := CreatePipeline(in, out,
+    PipelinePanicHandler(func(a PanicType, b interface{}){
+      /* nopp */
+    }),
+  )
+  for i := 0; i < s; i += 1 {
+    p.Enqueue(i)
+  }
+  p.ShutdownAndWait()
+
+  for i := 0; i < s; i += 1 {
+    if a[i] != i {
+      t.Errorf("should be equals1 %v = %v", i, a[i])
+    }
+    if b[i] != i {
+      t.Errorf("should be equals2 %v = %v", i, b[i])
+    }
+    if a[i] != b[i] {
+      t.Errorf("should be equals3 %v = %v == %v", i, a[i], b[i])
+    }
+  }
+  t.Logf("seq = %v", b)
+}
 
 func TestPipelineInOutParameter(t *testing.T) {
   type Bar struct {
@@ -118,7 +170,7 @@ func TestPipelineInOutParameter(t *testing.T) {
 
   for _, tuple := range tuples {
     t.Run(tuple.name, func(tt *testing.T) {
-      p := CreatePipeline(1, 10, tuple.in(tt), tuple.out(tt),
+      p := CreatePipeline(tuple.in(tt), tuple.out(tt),
         PipelinePanicHandler(func(a PanicType, b interface{}){
           /* nopp */
         }),

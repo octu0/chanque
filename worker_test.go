@@ -20,8 +20,7 @@ func TestWorkerSequence(t *testing.T) {
 
       c = append(c, p.(int))
 
-      r := rand.Intn(10)
-      time.Sleep(time.Duration(r) * time.Millisecond)
+      time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
     }
     w := NewDefaultWorker(h)
     w.Run(nil)
@@ -52,8 +51,7 @@ func TestWorkerSequence(t *testing.T) {
 
       c = append(c, p.(int))
 
-      r := rand.Intn(10)
-      time.Sleep(time.Duration(r) * time.Millisecond)
+      time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
     }
     w := NewBufferWorker(h)
     w.Run(nil)

@@ -11,57 +11,16 @@ type pipe struct {
   input    interface{}
   result   chan *pipeInputResult
   done     chan struct{}
-  bootOut  *sync.WaitGroup
-  bootDone *sync.WaitGroup
 }
+
 type pipeInputResult struct {
   result interface{}
   err    error
 }
 
-func callInput(pp *pipe, in PipelineInputFunc) Job {
-  return func(){
-    result, err := in(pp.input)
-
-    pp.bootOut.Wait()
-    pp.result <-&pipeInputResult{result, err}
-    close(pp.result)
-  }
-}
-
-func callOutput(pp *pipe, out PipelineOutputFunc) Job {
-  return func(){
-    pp.bootDone.Wait()
-    pp.bootOut.Done()
-
-    r := <-pp.result
-    out(r.result, r.err)
-
-    pp.done <-struct{}{}
-    close(pp.done)
-  }
-}
-
-func callDone(pp *pipe, wg *sync.WaitGroup) Job {
-  return func(){
-    pp.bootDone.Done()
-
-    <-pp.done
-
-    wg.Done()
-  }
-}
-
-func callDoneCancel(wg *sync.WaitGroup) Job {
-  return func(){
-    wg.Done()
-  }
-}
-
 type PipelineOptionFunc func(*PipelineOption)
 type PipelineOption struct {
   panicHandler PanicHandler
-  maxCapacity  int
 }
 
 func PipelinePanicHandler(handler PanicHandler) PipelineOptionFunc {
@@ -69,65 +28,79 @@ func PipelinePanicHandler(handler PanicHandler) PipelineOptionFunc {
     p.panicHandler = handler
   }
 }
-func PipelineMaxCapacity(capacity int) PipelineOptionFunc {
-  return func(p *PipelineOption) {
-    p.maxCapacity = capacity
-  }
-}
 
 type Pipeline struct {
   done         *sync.WaitGroup
   parameters   Worker
-  inout        *Executor
+  inWorker     Worker
+  outWorker    Worker
+  doneWorker   Worker
   inFunc       PipelineInputFunc
   outFunc      PipelineOutputFunc
 }
 
-func CreatePipeline(minWorker,maxWorker int, inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...PipelineOptionFunc) *Pipeline {
+func CreatePipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...PipelineOptionFunc) *Pipeline {
   opt:= new(PipelineOption)
   for _, fn := range opts {
     fn(opt)
   }
-  if opt.maxCapacity < 1 {
-    opt.maxCapacity = 3 // in + out + res
-  }
   if opt.panicHandler == nil {
     opt.panicHandler = defaultPanicHandler
-  }
-  if minWorker < 1 {
-    minWorker = 1
-  }
-  if maxWorker < 3 {
-    maxWorker = 3 // in + out + res
   }
 
   p           := new(Pipeline)
   p.done       = new(sync.WaitGroup)
   p.inFunc     = inFunc
   p.outFunc    = outFunc
-  p.parameters = NewDefaultWorker(p.worker)
+  p.parameters = NewBufferWorker(p.workerPrepare)
   p.parameters.PanicHandler(opt.panicHandler)
   p.parameters.Run(nil)
 
-  p.inout      = CreateExecutor(minWorker, maxWorker,
-    ExecutorMaxCapacity(opt.maxCapacity),
-    ExecutorPanicHandler(opt.panicHandler),
-  )
+  p.inWorker   = NewBufferWorker(p.workerIn)
+  p.inWorker.PanicHandler(opt.panicHandler)
+  p.inWorker.Run(nil)
+
+  p.outWorker  = NewBufferWorker(p.workerOut)
+  p.outWorker.PanicHandler(opt.panicHandler)
+  p.outWorker.Run(nil)
+
+  p.doneWorker = NewBufferWorker(p.workerDone)
+  p.doneWorker.PanicHandler(opt.panicHandler)
+  p.doneWorker.Run(nil)
 
   return p
 }
 
-func (p *Pipeline) worker(parameter interface{}) {
-  pp, ok := parameter.(*pipe)
-  if ok != true {
-    panic("invalid worker parameter")
-  }
-  pp.bootDone.Add(1)
-  pp.bootOut.Add(1)
+func (p *Pipeline) workerPrepare(parameter interface{}) {
+  pp := parameter.(*pipe)
 
-  p.inout.Submit(callDone(pp, p.done))
-  p.inout.Submit(callOutput(pp, p.outFunc))
-  p.inout.Submit(callInput(pp, p.inFunc))
+  p.doneWorker.Enqueue(pp)
+  p.outWorker.Enqueue(pp)
+  p.inWorker.Enqueue(pp)
+}
+
+func (p *Pipeline) workerIn(parameter interface{}) {
+  pp := parameter.(*pipe)
+
+  result, err := p.inFunc(pp.input)
+  pp.result <-&pipeInputResult{result, err}
+  close(pp.result)
+}
+
+func (p *Pipeline) workerOut(parameter interface{}) {
+  pp := parameter.(*pipe)
+  r  := <-pp.result
+  p.outFunc(r.result, r.err)
+
+  pp.done <-struct{}{}
+  close(pp.done)
+}
+
+func (p *Pipeline) workerDone(parameter interface{}) {
+  pp := parameter.(*pipe)
+
+  <-pp.done
+  p.done.Done()
 }
 
 func (p *Pipeline) Enqueue(parameter interface{}) bool {
@@ -135,8 +108,6 @@ func (p *Pipeline) Enqueue(parameter interface{}) bool {
     input:    parameter,
     result:   make(chan *pipeInputResult),
     done:     make(chan struct{}),
-    bootOut:  new(sync.WaitGroup),
-    bootDone: new(sync.WaitGroup),
   }
 
   p.done.Add(1)
@@ -149,13 +120,23 @@ func (p *Pipeline) Enqueue(parameter interface{}) bool {
 
 func (p *Pipeline) Shutdown() {
   p.parameters.Shutdown()
-  p.inout.Release()
+  p.inWorker.Shutdown()
+  p.outWorker.Shutdown()
+  p.doneWorker.Shutdown()
 }
 
 func (p *Pipeline) ShutdownAndWait() {
   if p.parameters.CloseEnqueue() {
     p.parameters.ShutdownAndWait()
   }
+  if p.inWorker.CloseEnqueue() {
+    p.inWorker.ShutdownAndWait()
+  }
+  if p.outWorker.CloseEnqueue() {
+    p.outWorker.ShutdownAndWait()
+  }
+  if p.doneWorker.CloseEnqueue() {
+    p.doneWorker.ShutdownAndWait()
+  }
   p.done.Wait()
-  p.inout.Release()
 }
