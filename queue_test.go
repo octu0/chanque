@@ -8,8 +8,7 @@ import(
 func TestBlockingEnqueue(t *testing.T) {
   t.Run("blocking", func(tt *testing.T) {
     done  := make(chan struct{})
-    queue := NewQueue(0)
-    queue.PanicHandler(noopPanicHandler)
+    queue := NewQueue(0, QueuePanicHandler(noopPanicHandler))
 
     go func(){
       queue.Enqueue(struct{}{})
@@ -28,8 +27,7 @@ func TestBlockingEnqueue(t *testing.T) {
 
   t.Run("non-blocking", func(tt *testing.T) {
     done  := make(chan struct{})
-    queue := NewQueue(1)
-    queue.PanicHandler(noopPanicHandler)
+    queue := NewQueue(1, QueuePanicHandler(noopPanicHandler))
 
     go func(){
       queue.Enqueue(struct{}{})
@@ -118,18 +116,19 @@ func TestBlockingEnqueueWithBlockingDequeue(t *testing.T) {
 func TestRecoveryHandlerEnqueue(t *testing.T) {
   done  := make(chan struct{})
   value := "not panic run"
-  queue := NewQueue(0)
-  queue.PanicHandler(func(pt PanicType, err interface{}) {
-    if pt != PanicTypeEnqueue {
-      t.Errorf("not enqueue panic %v", pt)
-    }
-    switch err.(type) {
-    case error:
-      value = "ok recover() handling"
-    default:
-      value = "not error type"
-    }
-  })
+  queue := NewQueue(0,
+    QueuePanicHandler(func(pt PanicType, err interface{}) {
+      if pt != PanicTypeEnqueue {
+        t.Errorf("not enqueue panic %v", pt)
+      }
+      switch err.(type) {
+      case error:
+        value = "ok recover() handling"
+      default:
+        value = "not error type"
+      }
+    }),
+  )
 
   go func() {
     queue.Enqueue(struct{}{})
@@ -151,19 +150,20 @@ func TestRecoveryHandlerEnqueue(t *testing.T) {
 }
 func TestRecoveryHandlerSendByClosedChannel(t *testing.T) {
   value := "not panic run"
-  queue := NewQueue(0)
-  queue.PanicHandler(func(pt PanicType, err interface{}) {
-    if pt != PanicTypeEnqueue {
-      t.Errorf("not enqueue panic %v", pt)
-    }
-    switch err.(type) {
-    case error:
-      // panic: send on closed channel
-      value = "ok recover() handling"
-    default:
-      value = "not error type"
-    }
-  })
+  queue := NewQueue(0,
+    QueuePanicHandler(func(pt PanicType, err interface{}) {
+      if pt != PanicTypeEnqueue {
+        t.Errorf("not enqueue panic %v", pt)
+      }
+      switch err.(type) {
+      case error:
+        // panic: send on closed channel
+        value = "ok recover() handling"
+      default:
+        value = "not error type"
+      }
+    }),
+  )
 
   queue.Close()
   queue.Enqueue(struct{}{})
@@ -177,19 +177,20 @@ func TestRecoveryHandlerSendByClosedChannel(t *testing.T) {
 
 func TestRecoveryHandlerWithDoubleClose(t *testing.T) {
   qv := "not double close"
-  qc := NewQueue(0)
-  qc.PanicHandler(func(pt PanicType, err interface{}) {
-    if pt != PanicTypeClose {
-      t.Errorf("not close panic %v", pt)
-    }
-    switch err.(type) {
-    case error:
-      // panic: close of closed channel
-      qv = "ok double close chan handling"
-    default:
-      qv = "not error type"
-    }
-  })
+  qc := NewQueue(0,
+    QueuePanicHandler(func(pt PanicType, err interface{}) {
+      if pt != PanicTypeClose {
+        t.Errorf("not close panic %v", pt)
+      }
+      switch err.(type) {
+      case error:
+        // panic: close of closed channel
+        qv = "ok double close chan handling"
+      default:
+        qv = "not error type"
+      }
+    }),
+  )
   qc.Close()
   <-time.After(10 * time.Millisecond)
   if qv != "not double close" {
