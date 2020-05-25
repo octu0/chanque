@@ -15,8 +15,8 @@ func TestExecutorDefault(t *testing.T) {
     if e.maxWorker != 1 {
       t.Errorf("default max 1 actual:%d", e.maxWorker)
     }
-    if e.maxCapacity != 0 {
-      t.Errorf("default capacity 0 actual:%d", e.maxCapacity)
+    if cap(e.jobs.Chan()) != 0 {
+      t.Errorf("default capacity 0 actual:%d", cap(e.jobs.Chan()))
     }
     if e.reducerInterval != defaultReducerInterval {
       t.Errorf("default 10s actual:%s", e.reducerInterval)
@@ -39,8 +39,8 @@ func TestExecutorDefault(t *testing.T) {
     if e.maxWorker != 100 {
       tt.Errorf("init max < min then max eq min: %d", e.maxWorker)
     }
-    if e.maxCapacity != 0 {
-      tt.Errorf("init maxCapacity default 0: %d", e.maxCapacity)
+    if cap(e.jobs.Chan()) != 0 {
+      tt.Errorf("init maxCapacity default 0: %d", cap(e.jobs.Chan()))
     }
   })
 
@@ -54,8 +54,8 @@ func TestExecutorDefault(t *testing.T) {
     if e.maxWorker != 150 {
       tt.Errorf("init specified max: %d", e.maxWorker)
     }
-    if e.maxCapacity != 0 {
-      tt.Errorf("init maxCapacity default 0: %d", e.maxCapacity)
+    if cap(e.jobs.Chan()) != 0 {
+      tt.Errorf("init maxCapacity default 0: %d", cap(e.jobs.Chan()))
     }
   })
 }
@@ -73,8 +73,8 @@ func TestExecutorOption(t *testing.T) {
     if e.maxWorker != 5 {
       tt.Errorf("init specified max: %d", e.maxWorker)
     }
-    if e.maxCapacity != 2 {
-      tt.Errorf("init specified capacity: %d", e.maxCapacity)
+    if cap(e.jobs.Chan()) != 2 {
+      tt.Errorf("init specified capacity: %d", cap(e.jobs.Chan()))
     }
   })
 
@@ -90,8 +90,8 @@ func TestExecutorOption(t *testing.T) {
     if e.maxWorker != 5 {
       tt.Errorf("init specified max: %d", e.maxWorker)
     }
-    if e.maxCapacity != 0 {
-      tt.Errorf("init specified capacity: %d", e.maxCapacity)
+    if cap(e.jobs.Chan()) != 0 {
+      tt.Errorf("init specified capacity: %d", cap(e.jobs.Chan()))
     }
   })
 
@@ -102,8 +102,8 @@ func TestExecutorOption(t *testing.T) {
     )
     defer e.Release()
 
-    if e.maxCapacity != 10 {
-      tt.Errorf("init specified capacity: %d", e.maxCapacity)
+    if cap(e.jobs.Chan()) != 10 {
+      tt.Errorf("init specified capacity: %d", cap(e.jobs.Chan()))
     }
     if e.reducerInterval != (time.Duration(30) * time.Millisecond) {
       tt.Errorf("init specified interval: %s", e.reducerInterval)

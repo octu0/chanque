@@ -9,27 +9,39 @@ import(
 
 type Job func()
 
-type ExecutorOption func(*Executor)
+type ExecutorOptionFunc func(*ExecutorOption)
+
+type ExecutorOption struct {
+  ctx             context.Context
+  panicHandler    PanicHandler
+  reducerInterval time.Duration
+  maxCapacity     int
+}
+
+func ExecutorPanicHandler(handler PanicHandler) ExecutorOptionFunc {
+  return func(opt *ExecutorOption) {
+    opt.panicHandler = handler
+  }
+}
+func ExecutorReducderInterval(interval time.Duration) ExecutorOptionFunc {
+  return func(opt *ExecutorOption) {
+    opt.reducerInterval = interval
+  }
+}
+func ExecutorMaxCapacity(capacity int) ExecutorOptionFunc {
+  return func(opt *ExecutorOption) {
+    opt.maxCapacity = capacity
+  }
+}
+func ExecutorContext(ctx context.Context) ExecutorOptionFunc {
+  return func(opt *ExecutorOption) {
+    opt.ctx = ctx
+  }
+}
 
 var(
   defaultReducerInterval = 10 * time.Second
 )
-
-func ExecutorPanicHandler(handler PanicHandler) ExecutorOption {
-  return func(e *Executor) {
-    e.panicHandler = handler
-  }
-}
-func ExecutorReducderInterval(interval time.Duration) ExecutorOption {
-  return func(e *Executor) {
-    e.reducerInterval = interval
-  }
-}
-func ExecutorMaxCapacity(capacity int) ExecutorOption {
-  return func(e *Executor) {
-    e.maxCapacity = capacity
-  }
-}
 
 type Executor struct {
   mutex           *sync.Mutex
@@ -40,17 +52,16 @@ type Executor struct {
   healthCancel    context.CancelFunc
   minWorker       int
   maxWorker       int
-  maxCapacity     int
   panicHandler    PanicHandler
   reducerInterval time.Duration
   runningNum      int32
   workerNum       int32
 }
 
-func CreateExecutor(minWorker, maxWorker int, opts ...ExecutorOption) *Executor {
-  e := new(Executor)
-  for _, opt := range opts {
-    opt(e)
+func CreateExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executor {
+  opt := new(ExecutorOption)
+  for _, fn := range funcs {
+    fn(opt)
   }
 
   if minWorker < 1 {
@@ -62,29 +73,33 @@ func CreateExecutor(minWorker, maxWorker int, opts ...ExecutorOption) *Executor 
   if maxWorker < minWorker {
     maxWorker = minWorker
   }
-  e.minWorker = minWorker
-  e.maxWorker = maxWorker
 
-  if e.maxCapacity < 1 {
-    e.maxCapacity = 0
+  if opt.maxCapacity < 1 {
+    opt.maxCapacity = 0
   }
-  if e.panicHandler == nil {
-    e.panicHandler = defaultPanicHandler
+  if opt.panicHandler == nil {
+    opt.panicHandler = defaultPanicHandler
   }
-  if e.reducerInterval < 1 {
-    e.reducerInterval = defaultReducerInterval
+  if opt.reducerInterval < 1 {
+    opt.reducerInterval = defaultReducerInterval
+  }
+  if opt.ctx == nil {
+    opt.ctx = context.Background()
   }
 
-  e.mutex        = new(sync.Mutex)
-  e.wg           = new(sync.WaitGroup)
-  e.jobs         = NewQueue(e.maxCapacity)
-  e.ctx          = context.Background()
-  e.jobCancel    = make([]context.CancelFunc, 0)
-  e.healthCancel = nil
-  e.runningNum   = int32(0)
-  e.workerNum    = int32(0)
-
-  e.jobs.PanicHandler(e.panicHandler)
+  e                := new(Executor)
+  e.mutex           = new(sync.Mutex)
+  e.wg              = new(sync.WaitGroup)
+  e.jobs            = NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler))
+  e.ctx             = opt.ctx
+  e.jobCancel       = make([]context.CancelFunc, 0)
+  e.healthCancel    = nil
+  e.minWorker       = minWorker
+  e.maxWorker       = maxWorker
+  e.panicHandler    = opt.panicHandler
+  e.reducerInterval = opt.reducerInterval
+  e.runningNum      = int32(0)
+  e.workerNum       = int32(0)
 
   e.initWorker()
   return e
