@@ -7,6 +7,8 @@ import(
 
 func TestExecutorDefault(t *testing.T) {
   chkDefault := func(e *Executor) {
+    defer e.Release()
+
     if e.minWorker != 0 {
       t.Errorf("default min 0 actual:%d", e.minWorker)
     }
@@ -27,130 +29,177 @@ func TestExecutorDefault(t *testing.T) {
   chkDefault(CreateExecutor(-1, -1))
   chkDefault(CreateExecutor(-1, -2))
 
-  e1 := CreateExecutor(100, 50)
-  if e1.minWorker != 100 {
-    t.Errorf("init 100: %d", e1.minWorker)
-  }
-  if e1.maxWorker != 100 {
-    t.Errorf("init max < min then max eq min: %d", e1.maxWorker)
-  }
-  if e1.maxCapacity != 0 {
-    t.Errorf("init maxCapacity default 0: %d", e1.maxCapacity)
-  }
+  t.Run("100-50", func(tt *testing.T) {
+    e := CreateExecutor(100, 50)
+    defer e.Release()
 
-  e2 := CreateExecutor(50, 150)
-  if e2.minWorker != 50 {
-    t.Errorf("init 50: %d", e2.minWorker)
-  }
-  if e2.maxWorker != 150 {
-    t.Errorf("init specified max: %d", e2.maxWorker)
-  }
-  if e2.maxCapacity != 0 {
-    t.Errorf("init maxCapacity default 0: %d", e2.maxCapacity)
-  }
+    if e.minWorker != 100 {
+      tt.Errorf("init 100: %d", e.minWorker)
+    }
+    if e.maxWorker != 100 {
+      tt.Errorf("init max < min then max eq min: %d", e.maxWorker)
+    }
+    if e.maxCapacity != 0 {
+      tt.Errorf("init maxCapacity default 0: %d", e.maxCapacity)
+    }
+  })
+
+  t.Run("50-150", func(tt *testing.T) {
+    e := CreateExecutor(50, 150)
+    defer e.Release()
+
+    if e.minWorker != 50 {
+      tt.Errorf("init 50: %d", e.minWorker)
+    }
+    if e.maxWorker != 150 {
+      tt.Errorf("init specified max: %d", e.maxWorker)
+    }
+    if e.maxCapacity != 0 {
+      tt.Errorf("init maxCapacity default 0: %d", e.maxCapacity)
+    }
+  })
 }
 
 func TestExecutorOption(t *testing.T) {
-  e1 := CreateExecutor(1, 5,
-    ExecutorMaxCapacity(2),
-  )
-  if e1.minWorker != 1 {
-    t.Errorf("init 1: %d", e1.minWorker)
-  }
-  if e1.maxWorker != 5 {
-    t.Errorf("init specified max: %d", e1.maxWorker)
-  }
-  if e1.maxCapacity != 2 {
-    t.Errorf("init specified capacity: %d", e1.maxCapacity)
-  }
+  t.Run("cap2", func(tt *testing.T) {
+    e := CreateExecutor(1, 5,
+      ExecutorMaxCapacity(2),
+    )
+    defer e.Release()
 
-  e2 := CreateExecutor(1, 5,
-    ExecutorMaxCapacity(0),
-  )
-  if e2.minWorker != 1 {
-    t.Errorf("init 1: %d", e2.minWorker)
-  }
-  if e2.maxWorker != 5 {
-    t.Errorf("init specified max: %d", e2.maxWorker)
-  }
-  if e2.maxCapacity != 0 {
-    t.Errorf("init specified capacity: %d", e2.maxCapacity)
-  }
+    if e.minWorker != 1 {
+      tt.Errorf("init 1: %d", e.minWorker)
+    }
+    if e.maxWorker != 5 {
+      tt.Errorf("init specified max: %d", e.maxWorker)
+    }
+    if e.maxCapacity != 2 {
+      tt.Errorf("init specified capacity: %d", e.maxCapacity)
+    }
+  })
 
-  e3 := CreateExecutor(1, 5,
-    ExecutorMaxCapacity(10),
-    ExecutorReducderInterval(30 * time.Millisecond),
-  )
-  if e3.maxCapacity != 10 {
-    t.Errorf("init specified capacity: %d", e3.maxCapacity)
-  }
-  if e3.reducerInterval != (time.Duration(30) * time.Millisecond) {
-    t.Errorf("init specified interval: %s", e3.reducerInterval)
-  }
+  t.Run("cap0", func(tt *testing.T) {
+    e := CreateExecutor(1, 5,
+      ExecutorMaxCapacity(0),
+    )
+    defer e.Release()
 
-  e4 := CreateExecutor(1, 5,
-    ExecutorReducderInterval(0),
-  )
-  if e4.reducerInterval != defaultReducerInterval {
-    t.Errorf("init specified interval: %s", e4.reducerInterval)
-  }
+    if e.minWorker != 1 {
+      tt.Errorf("init 1: %d", e.minWorker)
+    }
+    if e.maxWorker != 5 {
+      tt.Errorf("init specified max: %d", e.maxWorker)
+    }
+    if e.maxCapacity != 0 {
+      tt.Errorf("init specified capacity: %d", e.maxCapacity)
+    }
+  })
 
-  val := "default"
-  ph := func(pt PanicType, rcv interface{}) {
-    val = "hello world"
-  }
-  e5 := CreateExecutor(0, 0,
-    ExecutorPanicHandler(ph),
-  )
-  e5.panicHandler(PanicType(0), nil)
-  if val != "hello world" {
-    t.Errorf("init specified panic handler: %v", e5.panicHandler)
-  }
+  t.Run("cap10/intval30", func(tt *testing.T) {
+    e := CreateExecutor(1, 5,
+      ExecutorMaxCapacity(10),
+      ExecutorReducderInterval(30 * time.Millisecond),
+    )
+    defer e.Release()
+
+    if e.maxCapacity != 10 {
+      tt.Errorf("init specified capacity: %d", e.maxCapacity)
+    }
+    if e.reducerInterval != (time.Duration(30) * time.Millisecond) {
+      tt.Errorf("init specified interval: %s", e.reducerInterval)
+    }
+  })
+
+  t.Run("intval0", func(tt *testing.T) {
+    e := CreateExecutor(1, 5,
+      ExecutorReducderInterval(0),
+    )
+    defer e.Release()
+
+    if e.reducerInterval != defaultReducerInterval {
+      tt.Errorf("init specified interval: %s", e.reducerInterval)
+    }
+  })
+
+  t.Run("panichandler", func(tt *testing.T) {
+    val := "default"
+    ph := func(pt PanicType, rcv interface{}) {
+      val = "hello world"
+    }
+
+    e := CreateExecutor(0, 0,
+      ExecutorPanicHandler(ph),
+    )
+    defer e.Release()
+
+    e.panicHandler(PanicType(0), nil)
+    if val != "hello world" {
+      t.Errorf("init specified panic handler: %v", e.panicHandler)
+    }
+  })
 }
 
 func TestExecutorRunningAndWorker(t *testing.T) {
-  e1 := CreateExecutor(10, 10)
-  e2 := CreateExecutor(0, 10)
-  e3 := CreateExecutor(-1, 15)
-  e4 := CreateExecutor(10, 15, ExecutorMaxCapacity(0))
-  e5 := CreateExecutor(10, 15, ExecutorMaxCapacity(5))
+  t.Run("10-10", func(tt *testing.T) {
+    e := CreateExecutor(10, 10)
+    defer e.Release()
+    time.Sleep(10 * time.Millisecond)
 
-  time.Sleep(10 * time.Millisecond)
+    if e.Running() != 0 {
+      tt.Errorf("running should be 0")
+    }
+    if e.Workers() != 10 {
+      tt.Errorf("worker startup 10")
+    }
+  })
+  t.Run("0-10", func(tt *testing.T) {
+    e := CreateExecutor(0, 10)
+    defer e.Release()
+    time.Sleep(10 * time.Millisecond)
 
-  if e1.Running() != 0 {
-    t.Errorf("running should be 0")
-  }
-  if e1.Workers() != 10 {
-    t.Errorf("worker startup 10")
-  }
+    if e.Running() != 0 {
+      tt.Errorf("running should be 0")
+    }
+    if e.Workers() != 0 {
+      tt.Errorf("worker startup 0")
+    }
+  })
+  t.Run("-1-15", func(tt *testing.T) {
+    e := CreateExecutor(-1, 15)
+    defer e.Release()
+    time.Sleep(10 * time.Millisecond)
 
-  if e2.Running() != 0 {
-    t.Errorf("running should be 0")
-  }
-  if e2.Workers() != 0 {
-    t.Errorf("worker startup 0")
-  }
+    if e.Running() != 0 {
+      tt.Errorf("running should be 0")
+    }
+    if e.Workers() != 0 {
+      tt.Errorf("worker startup 0")
+    }
+  })
+  t.Run("10-15-0", func(tt *testing.T) {
+    e := CreateExecutor(10, 15, ExecutorMaxCapacity(0))
+    defer e.Release()
+    time.Sleep(10 * time.Millisecond)
 
-  if e3.Running() != 0 {
-    t.Errorf("running should be 0")
-  }
-  if e3.Workers() != 0 {
-    t.Errorf("worker startup 0")
-  }
+    if e.Running() != 0 {
+      tt.Errorf("running should be 0")
+    }
+    if e.Workers() != 10 {
+      tt.Errorf("worker startup 10")
+    }
+  })
+  t.Run("10-15-5", func(tt *testing.T) {
+    e := CreateExecutor(10, 15, ExecutorMaxCapacity(5))
+    defer e.Release()
+    time.Sleep(10 * time.Millisecond)
 
-  if e4.Running() != 0 {
-    t.Errorf("running should be 0")
-  }
-  if e4.Workers() != 10 {
-    t.Errorf("worker startup 10")
-  }
-
-  if e5.Running() != 0 {
-    t.Errorf("running should be 0")
-  }
-  if e5.Workers() != 10 {
-    t.Errorf("worker startup 10")
-  }
+    if e.Running() != 0 {
+      tt.Errorf("running should be 0")
+    }
+    if e.Workers() != 10 {
+      tt.Errorf("worker startup 10")
+    }
+  })
 }
 
 func TestExecutorOndemandStart(t *testing.T) {
@@ -173,9 +222,9 @@ func TestExecutorOndemandStart(t *testing.T) {
   latch := make(chan struct{})
   e.Submit(func(){
     latch <-struct{}{}
-    println("fist worker running")
+    t.Logf("fist worker running")
     <-time.After(50 * time.Millisecond)
-    println("fist worker done")
+    t.Logf("fist worker done")
   })
 
   <-latch
@@ -200,7 +249,7 @@ func TestExecutorOndemandStart(t *testing.T) {
   case <-enqueued:
     t.Errorf("maxWorker is 1 = should be not goroutine generated")
   default:
-    println("no submit reader ok")
+    t.Logf("no submit reader ok")
     r3 := e.Running()
     w3 := e.Workers()
     if r3 != 1 {
@@ -215,11 +264,11 @@ func TestExecutorOndemandStart(t *testing.T) {
 
   select {
   case <-enqueued:
-    println("submit reader ok")
+    t.Logf("submit reader ok")
     r4 := e.Running()
     w4 := e.Workers()
-    if r4 != 1 {
-      t.Errorf("still running first worker actual:%d", r4)
+    if r4 != 0 {
+      t.Errorf("done running first worker actual:%d", r4)
     }
     if w4 != 1 {
       t.Errorf("not yet worker generated actual:%d", w4)
@@ -335,7 +384,7 @@ func TestExecutorSubmitBlocking(t *testing.T) {
     e1.Submit(func (ch chan struct{}) func(){
       return func(){
         ch <-struct{}{}
-        println("hoge")
+        t.Logf("hoge")
       }
     }(enqueue))
   }
@@ -364,7 +413,7 @@ func TestExecutorSubmitBlocking(t *testing.T) {
 
   select {
   case <-time.After(10 * time.Millisecond):
-    println("max capacity exceeded. submit blocking ok1")
+    t.Logf("max capacity exceeded. submit blocking ok1")
   case <-done:
     t.Errorf("submit should be blocked")
   }
@@ -380,17 +429,17 @@ func TestExecutorSubmitBlocking(t *testing.T) {
 }
 
 func TestExecutorSubmitNonBlocking(t *testing.T) {
-  e1 := CreateExecutor(0, 100,
+  e := CreateExecutor(0, 100,
     ExecutorMaxCapacity(50),
     ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
       /* nop */
     }),
   )
-  defer e1.Release()
+  defer e.Release()
 
   enqueue := make(chan struct{})
   for i := 0; i < 100; i += 1 {
-    e1.Submit(func (ch chan struct{}) func(){
+    e.Submit(func (ch chan struct{}) func(){
       return func(){
         ch <-struct{}{}
       }
@@ -398,8 +447,8 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
   }
   time.Sleep(10 * time.Millisecond)
 
-  r1 := e1.Running()
-  w1 := e1.Workers()
+  r1 := e.Running()
+  w1 := e.Workers()
   if r1 != 100 {
     t.Errorf("blocking waiting reader running: %d", r1)
   }
@@ -411,7 +460,7 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
   done  := make(chan struct{})
   go func(la chan struct{}, d chan struct{}, ch chan struct{}){
     <-la
-    e1.Submit(func(){
+    e.Submit(func(){
       ch <-struct{}{}
     })
     d <-struct{}{}
@@ -427,7 +476,7 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
   }
 
   for i := 0; i < 49; i += 1 {
-    e1.Submit(func (ch chan struct{}) func(){
+    e.Submit(func (ch chan struct{}) func(){
       return func(){
         ch <-struct{}{}
       }
@@ -435,8 +484,8 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
   }
   time.Sleep(10 * time.Millisecond)
 
-  r2 := e1.Running()
-  w2 := e1.Workers()
+  r2 := e.Running()
+  w2 := e.Workers()
   if r2 != 100 {
     t.Errorf("blocking waiting reader running: %d", r2)
   }
@@ -448,7 +497,7 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
   done2  := make(chan struct{})
   go func(la chan struct{}, d chan struct{}, ch chan struct{}){
     <-la
-    e1.Submit(func(){
+    e.Submit(func(){
       ch <-struct{}{}
     })
     d <-struct{}{}
@@ -462,4 +511,142 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
   case <-done2:
     t.Errorf("submit should be blocked")
   }
+}
+
+func TestExecutorWorkerShrink(t *testing.T) {
+  t.Run("min0/max10/job10", func(tt *testing.T){
+    e := CreateExecutor(0, 10,
+      ExecutorReducderInterval(50 * time.Millisecond),
+      ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
+        /* nop */
+      }),
+    )
+    defer e.Release()
+
+    r1 := e.Running()
+    w1 := e.Workers()
+
+    if r1 != 0 {
+      tt.Errorf("initial run is zero %v", r1)
+    }
+    if w1 != 0 {
+      tt.Errorf("initial worker is zero %v", w1)
+    }
+    for i := 0; i < 10; i += 1 {
+      e.Submit(func(){
+        time.Sleep(10 * time.Millisecond)
+      })
+    }
+    time.Sleep(1 * time.Millisecond) // waiting submitted
+
+    r2 := e.Running()
+    w2 := e.Workers()
+    if r2 != 10 {
+      tt.Errorf("running worker 10 != %v", r2)
+    }
+    if w2 != 10 {
+      tt.Errorf("generated workers 10 != %v", w2)
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    r3 := e.Running()
+    w3 := e.Workers()
+    if r3 != 0 {
+      tt.Errorf("done for all worker %v", r3)
+    }
+    if w3 != 0 {
+      tt.Errorf("worker shrink to min size0 %v", w3)
+    }
+  })
+  t.Run("min10/max30/job30", func(tt *testing.T) {
+    e := CreateExecutor(10, 30,
+      ExecutorReducderInterval(50 * time.Millisecond),
+      ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
+        /* nop */
+      }),
+    )
+    defer e.Release()
+
+    r1 := e.Running()
+    w1 := e.Workers()
+
+    if r1 != 0 {
+      tt.Errorf("initial run is zero %v", r1)
+    }
+    if w1 != 10 {
+      tt.Errorf("initial worker is 10 %v", w1)
+    }
+    for i := 0; i < 30; i += 1 {
+      e.Submit(func(){
+        time.Sleep(10 * time.Millisecond)
+      })
+    }
+    time.Sleep(5 * time.Millisecond) // waiting submitted
+
+    r2 := e.Running()
+    w2 := e.Workers()
+    if r2 != 30 {
+      tt.Errorf("running worker 30 != %v", r2)
+    }
+    if w2 != 30 {
+      tt.Errorf("generated workers 30 != %v", w2)
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    r3 := e.Running()
+    w3 := e.Workers()
+    if r3 != 0 {
+      tt.Errorf("done for all worker %v", r3)
+    }
+    if w3 != 10 {
+      tt.Errorf("worker shrink to min size10 %v", w3)
+    }
+  })
+  t.Run("min10/max30/job5", func(tt *testing.T) {
+    e := CreateExecutor(10, 30,
+      ExecutorReducderInterval(50 * time.Millisecond),
+      ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
+        /* nop */
+      }),
+    )
+    defer e.Release()
+
+    r1 := e.Running()
+    w1 := e.Workers()
+
+    if r1 != 0 {
+      tt.Errorf("initial run is zero %v", r1)
+    }
+    if w1 != 10 {
+      tt.Errorf("initial worker is 10 %v", w1)
+    }
+    for i := 0; i < 5; i += 1 {
+      e.Submit(func(){
+        time.Sleep(10 * time.Millisecond)
+      })
+    }
+    time.Sleep(1 * time.Millisecond) // waiting submitted
+
+    r2 := e.Running()
+    w2 := e.Workers()
+    if r2 != 5 {
+      tt.Errorf("running worker 5 != %v", r2)
+    }
+    if w2 != 10 {
+      tt.Errorf("generated workers 10 != %v", w2)
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    r3 := e.Running()
+    w3 := e.Workers()
+    if r3 != 0 {
+      tt.Errorf("done for all worker %v", r3)
+    }
+    if w3 != 10 {
+      tt.Errorf("worker shrink to min size10 %v", w3)
+    }
+  })
 }

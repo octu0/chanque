@@ -141,18 +141,25 @@ func (e *Executor) Workers() int32 {
 }
 
 func (e *Executor) startOndemand() {
+  running := int(e.Running())
+  if running < e.minWorker {
+    return
+  }
+
   next := int(e.increWorker())
-  if e.minWorker < next {
-    if next <= e.maxWorker {
-      e.mutex.Lock()
-      defer e.mutex.Unlock()
+  if running < next {
+    if e.minWorker < next {
+      if next <= e.maxWorker {
+        e.mutex.Lock()
+        defer e.mutex.Unlock()
 
-      e.wg.Add(1)
-      jctx, jcancel := context.WithCancel(e.ctx)
-      e.jobCancel = append(e.jobCancel, jcancel)
+        e.wg.Add(1)
+        jctx, jcancel := context.WithCancel(e.ctx)
+        e.jobCancel = append(e.jobCancel, jcancel)
 
-      go e.execloop(jctx, e.jobs)
-      return
+        go e.execloop(jctx, e.jobs)
+        return
+      }
     }
   }
   e.decreWorker()
