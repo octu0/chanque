@@ -1,6 +1,6 @@
 # `chanque`
 
-[![MIT License](https://img.shields.io/github/license/mashape/apistatus.svg?maxAge=2592000)](https://github.com/octu0/chanque/blob/master/LICENSE)
+[![MIT License](https://img.shields.io/github/license/octu0/chanque)](https://github.com/octu0/chanque/blob/master/LICENSE)
 [![GoDoc](https://godoc.org/github.com/octu0/chanque?status.svg)](https://godoc.org/github.com/octu0/chanque)
 [![Go Report Card](https://goreportcard.com/badge/github.com/octu0/chanque)](https://goreportcard.com/report/github.com/octu0/chanque)
 [![Releases](https://img.shields.io/github/v/release/octu0/chanque)](https://github.com/octu0/chanque/releases)
