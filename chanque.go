@@ -25,6 +25,7 @@ func (p PanicType) String() string {
 }
 
 type PanicHandler func(PanicType, interface{})
+
 func defaultPanicHandler(pt PanicType, rcv interface{}) {
   log.Printf("error: [recover] panic(%s) occurred %v stack %s", pt, rcv, string(debug.Stack()))
 }
