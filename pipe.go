@@ -52,21 +52,10 @@ func CreatePipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts .
   p.done       = new(sync.WaitGroup)
   p.inFunc     = inFunc
   p.outFunc    = outFunc
-  p.parameters = NewBufferWorker(p.workerPrepare)
-  p.parameters.PanicHandler(opt.panicHandler)
-  p.parameters.Run(nil)
-
-  p.inWorker   = NewBufferWorker(p.workerIn)
-  p.inWorker.PanicHandler(opt.panicHandler)
-  p.inWorker.Run(nil)
-
-  p.outWorker  = NewBufferWorker(p.workerOut)
-  p.outWorker.PanicHandler(opt.panicHandler)
-  p.outWorker.Run(nil)
-
-  p.doneWorker = NewBufferWorker(p.workerDone)
-  p.doneWorker.PanicHandler(opt.panicHandler)
-  p.doneWorker.Run(nil)
+  p.parameters = NewBufferWorker(p.workerPrepare, WorkerPanicHandler(opt.panicHandler))
+  p.inWorker   = NewBufferWorker(p.workerIn, WorkerPanicHandler(opt.panicHandler))
+  p.outWorker  = NewBufferWorker(p.workerOut, WorkerPanicHandler(opt.panicHandler))
+  p.doneWorker = NewBufferWorker(p.workerDone, WorkerPanicHandler(opt.panicHandler))
 
   return p
 }
