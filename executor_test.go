@@ -580,17 +580,17 @@ func TestExecutorWorkerShrink(t *testing.T) {
     }
     for i := 0; i < 30; i += 1 {
       e.Submit(func(){
-        time.Sleep(50 * time.Millisecond)
+        time.Sleep(10 * time.Millisecond)
       })
     }
-    time.Sleep(10 * time.Millisecond) // waiting submitted
+    time.Sleep(5 * time.Millisecond) // waiting submitted
 
     r2 := e.Running()
     w2 := e.Workers()
-    if (10 < r2 && r2 <= 30) != true {
+    if (10 <= r2 && r2 <= 30) != true {
       tt.Errorf("running worker around 30 != %v", r2)
     }
-    if (10 < w2 && w2 <= 30) != true {
+    if (10 <= w2 && w2 <= 30) != true {
       tt.Errorf("generated workers around 30 != %v", w2)
     }
 
