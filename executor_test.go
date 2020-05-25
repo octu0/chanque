@@ -560,51 +560,51 @@ func TestExecutorWorkerShrink(t *testing.T) {
       tt.Errorf("worker shrink to min size0 %v", w3)
     }
   })
-//  t.Run("min10/max30/job30", func(tt *testing.T) {
-//    e := NewExecutor(10, 30,
-//      ExecutorReducderInterval(50 * time.Millisecond),
-//      ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
-//        /* nop */
-//      }),
-//    )
-//    defer e.Release()
-//
-//    r1 := e.Running()
-//    w1 := e.Workers()
-//
-//    if r1 != 0 {
-//      tt.Errorf("initial run is zero %v", r1)
-//    }
-//    if w1 != 10 {
-//      tt.Errorf("initial worker is 10 %v", w1)
-//    }
-//    for i := 0; i < 30; i += 1 {
-//      e.Submit(func(){
-//        time.Sleep(50 * time.Millisecond)
-//      })
-//    }
-//    time.Sleep(10 * time.Millisecond) // waiting submitted
-//
-//    r2 := e.Running()
-//    w2 := e.Workers()
-//    if r2 != 30 {
-//      tt.Errorf("running worker 30 != %v", r2)
-//    }
-//    if w2 != 30 {
-//      tt.Errorf("generated workers 30 != %v", w2)
-//    }
-//
-//    time.Sleep(100 * time.Millisecond)
-//
-//    r3 := e.Running()
-//    w3 := e.Workers()
-//    if r3 != 0 {
-//      tt.Errorf("done for all worker %v", r3)
-//    }
-//    if w3 != 10 {
-//      tt.Errorf("worker shrink to min size10 %v", w3)
-//    }
-//  })
+  t.Run("min10/max30/job30", func(tt *testing.T) {
+    e := NewExecutor(10, 30,
+      ExecutorReducderInterval(50 * time.Millisecond),
+      ExecutorPanicHandler(func(pt PanicType, rcv interface{}){
+        /* nop */
+      }),
+    )
+    defer e.Release()
+
+    r1 := e.Running()
+    w1 := e.Workers()
+
+    if r1 != 0 {
+      tt.Errorf("initial run is zero %v", r1)
+    }
+    if w1 != 10 {
+      tt.Errorf("initial worker is 10 %v", w1)
+    }
+    for i := 0; i < 30; i += 1 {
+      e.Submit(func(){
+        time.Sleep(50 * time.Millisecond)
+      })
+    }
+    time.Sleep(10 * time.Millisecond) // waiting submitted
+
+    r2 := e.Running()
+    w2 := e.Workers()
+    if (10 < r2 && r2 <= 30) != true {
+      tt.Errorf("running worker around 30 != %v", r2)
+    }
+    if (10 < w2 && w2 <= 30) != true {
+      tt.Errorf("generated workers around 30 != %v", w2)
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    r3 := e.Running()
+    w3 := e.Workers()
+    if r3 != 0 {
+      tt.Errorf("done for all worker %v", r3)
+    }
+    if w3 != 10 {
+      tt.Errorf("worker shrink to min size10 %v", w3)
+    }
+  })
   t.Run("min10/max30/job5", func(tt *testing.T) {
     e := NewExecutor(10, 30,
       ExecutorReducderInterval(50 * time.Millisecond),

@@ -52,7 +52,7 @@ func TestWorkerSequence(t *testing.T) {
 
       time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
     }
-    w := NewBufferWorker(h)
+    w := NewBufferWorker(h, WorkerPanicHandler(noopPanicHandler))
     for i := 0; i < s; i += 1 {
       w.Enqueue(i)
     }
@@ -100,7 +100,7 @@ func TestBufferWorkerShutdownAndWait(t *testing.T) {
       time.Sleep(10 * time.Millisecond)
       tt.Logf("val = %v", p)
     }
-    w := NewBufferWorker(h)
+    w := NewBufferWorker(h, WorkerPanicHandler(noopPanicHandler))
     w.Enqueue(10)
     w.Enqueue(20)
     w.Enqueue(30)
@@ -110,7 +110,7 @@ func TestBufferWorkerShutdownAndWait(t *testing.T) {
     h := func(p interface{}) {
       time.Sleep(10 * time.Millisecond)
     }
-    w := NewBufferWorker(h)
+    w := NewBufferWorker(h, WorkerPanicHandler(noopPanicHandler))
     for i := 0; i < 10; i += 1 {
       w.Enqueue(i)
     }
