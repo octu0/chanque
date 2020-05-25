@@ -6,39 +6,45 @@ import(
 )
 
 func TestBlockingEnqueue(t *testing.T) {
-  done1  := make(chan struct{})
-  queue1 := NewQueue(0)
+  t.Run("blocking", func(tt *testing.T) {
+    done  := make(chan struct{})
+    queue := NewQueue(0)
+    queue.PanicHandler(noopPanicHandler)
 
-  go func(){
-    queue1.Enqueue(struct{}{})
-    done1 <-struct{}{}
-  }()
+    go func(){
+      queue.Enqueue(struct{}{})
+      done <-struct{}{}
+    }()
 
-  select {
-  case <-time.After(10 * time.Millisecond):
-    t.Log("blocking enqueue ok1")
-    queue1.Close()
+    select {
+    case <-time.After(10 * time.Millisecond):
+      tt.Log("blocking enqueue ok1")
+      queue.Close()
 
-  case <-done1:
-    t.Errorf("not blocking enqueue 1")
-  }
+    case <-done:
+      tt.Errorf("not blocking enqueue 1")
+    }
+  })
 
-  done2  := make(chan struct{})
-  queue2 := NewQueue(1)
+  t.Run("non-blocking", func(tt *testing.T) {
+    done  := make(chan struct{})
+    queue := NewQueue(1)
+    queue.PanicHandler(noopPanicHandler)
 
-  go func(){
-    queue2.Enqueue(struct{}{})
-    done2 <-struct{}{}
-  }()
+    go func(){
+      queue.Enqueue(struct{}{})
+      done <-struct{}{}
+    }()
 
-  select {
-  case <-time.After(10 * time.Millisecond):
-    queue2.Close()
-    t.Errorf("blocking enqueue: queue2 has free capacity")
+    select {
+    case <-time.After(10 * time.Millisecond):
+      queue.Close()
+      tt.Errorf("blocking enqueue: queue2 has free capacity")
 
-  case <-done2:
-    t.Log("blocking enqueue ok2")
-  }
+    case <-done:
+      tt.Log("blocking enqueue ok2")
+    }
+  })
 }
 
 func TestBlockingEnqueueNB(t *testing.T) {
@@ -83,6 +89,7 @@ func TestBlockingEnqueueWithBlockingDequeue(t *testing.T) {
 
   value  := "pre value"
   queue  := NewQueue(0)
+
   go func() {
     <-done1
     v, ok := queue.Dequeue()
@@ -195,99 +202,103 @@ func TestRecoveryHandlerWithDoubleClose(t *testing.T) {
   }
 }
 
-func TestEnqueueRetryNoReader(t *testing.T) {
-  q := NewQueue(0)
-  write := q.EnqueueRetry("hello world", 1 * time.Millisecond, 10)
-  if write {
-    t.Errorf("queue has no reader => expect missing enqueue")
-  }
-}
-func TestEnqueueRetryDelayReader(t *testing.T) {
-  q := NewQueue(0)
-
-  latch := make(chan struct{})
-  enq := make(chan bool)
-  go func(c chan struct{}, r chan bool){
-    <-c
-    r <-q.EnqueueRetry("hello world2", 10 * time.Millisecond, 10)
-  }(latch, enq)
-
-  type pair struct {
-    val interface{}
-    ok  bool
-  }
-  deq := make(chan pair)
-  go func(c chan struct{}, r chan pair) {
-    c <-struct{}{} // start latch
-
-    time.Sleep(12 * time.Millisecond) // enqueue retry
-
-    val, ok := q.Dequeue()
-    r <-pair{val, ok}
-  }(latch, deq)
-
-  write := <-enq
-  p := <-deq
-
-  if write != true {
-    t.Errorf("enqueue should be succeed")
-  }
-  if p.ok != true {
-    t.Errorf("dequeue should be succeed")
-  }
-  if val, ok := p.val.(string); ok {
-    if val != "hello world2" {
-      t.Errorf("value != %s", val)
+func TestEnqueueRetry(t *testing.T) {
+  t.Run("NoReader", func(tt *testing.T) {
+    q := NewQueue(0)
+    write := q.EnqueueRetry("hello world", 1 * time.Millisecond, 10)
+    if write {
+      tt.Errorf("queue has no reader => expect missing enqueue")
     }
-  } else {
-    t.Errorf("not string value %v", p.val)
-  }
-}
-func TestDequeueRetryNoReader(t *testing.T) {
-  q := NewQueue(0)
-  _, ok := q.DequeueRetry(1 * time.Millisecond, 10)
-  if ok {
-    t.Errorf("queue has no writer => expect missing dequeue")
-  }
-}
-func TestDequeueRetryDelayWriter(t *testing.T) {
-  q := NewQueue(0)
+  })
+  t.Run("DelayReader", func(tt *testing.T) {
+    q := NewQueue(0)
 
-  type pair struct {
-    val interface{}
-    ok  bool
-  }
-  latch := make(chan struct{})
-  deq   := make(chan pair)
-  go func(c chan struct{}, r chan pair) {
-    <-c
-    val, ok := q.DequeueRetry(10 * time.Millisecond, 10)
-    r <-pair{val, ok}
-  }(latch, deq)
+    latch := make(chan struct{})
+    enq := make(chan bool)
+    go func(c chan struct{}, r chan bool){
+      <-c
+      r <-q.EnqueueRetry("hello world2", 10 * time.Millisecond, 10)
+    }(latch, enq)
 
-  enq := make(chan bool)
-  go func(c chan struct{}, r chan bool) {
-    c <-struct{}{} // start latch
-
-    time.Sleep(12 * time.Millisecond) // dequeue retry
-
-    r <-q.Enqueue("hello world3")
-  }(latch, enq)
-
-  p := <-deq
-  write := <-enq
-
-  if p.ok != true {
-    t.Errorf("dequeue should be succeed")
-  }
-  if val, ok := p.val.(string); ok {
-    if val != "hello world3" {
-      t.Errorf("value != %s", val)
+    type pair struct {
+      val interface{}
+      ok  bool
     }
-  } else {
-    t.Errorf("not string value %v", p.val)
-  }
-  if write != true {
-    t.Errorf("enqueue should be succeed")
-  }
+    deq := make(chan pair)
+    go func(c chan struct{}, r chan pair) {
+      c <-struct{}{} // start latch
+
+      time.Sleep(12 * time.Millisecond) // enqueue retry
+
+      val, ok := q.Dequeue()
+      r <-pair{val, ok}
+    }(latch, deq)
+
+    write := <-enq
+    p := <-deq
+
+    if write != true {
+      tt.Errorf("enqueue should be succeed")
+    }
+    if p.ok != true {
+      tt.Errorf("dequeue should be succeed")
+    }
+    if val, ok := p.val.(string); ok {
+      if val != "hello world2" {
+        tt.Errorf("value != %s", val)
+      }
+    } else {
+      tt.Errorf("not string value %v", p.val)
+    }
+  })
+}
+func TestDequeueRetry(t *testing.T) {
+  t.Run("NoWriter", func(tt *testing.T) {
+    q := NewQueue(0)
+    _, ok := q.DequeueRetry(1 * time.Millisecond, 10)
+    if ok {
+      t.Errorf("queue has no writer => expect missing dequeue")
+    }
+  })
+  t.Run("DelayWriter", func(tt *testing.T) {
+    q := NewQueue(0)
+
+    type pair struct {
+      val interface{}
+      ok  bool
+    }
+    latch := make(chan struct{})
+    deq   := make(chan pair)
+    go func(c chan struct{}, r chan pair) {
+      <-c
+      val, ok := q.DequeueRetry(10 * time.Millisecond, 10)
+      r <-pair{val, ok}
+    }(latch, deq)
+
+    enq := make(chan bool)
+    go func(c chan struct{}, r chan bool) {
+      c <-struct{}{} // start latch
+
+      time.Sleep(12 * time.Millisecond) // dequeue retry
+
+      r <-q.Enqueue("hello world3")
+    }(latch, enq)
+
+    p := <-deq
+    write := <-enq
+
+    if p.ok != true {
+      tt.Errorf("dequeue should be succeed")
+    }
+    if val, ok := p.val.(string); ok {
+      if val != "hello world3" {
+        tt.Errorf("value != %s", val)
+      }
+    } else {
+      tt.Errorf("not string value %v", p.val)
+    }
+    if write != true {
+      tt.Errorf("enqueue should be succeed")
+    }
+  })
 }
