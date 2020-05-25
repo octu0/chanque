@@ -179,7 +179,7 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWo
   w.ctx          = ctx
   w.cancel       = cancel
   w.panicHandler = opt.panicHandler
-  w.chkqueue     = NewQueue(1, QueuePanicHandler(opt.panicHandler))
+  w.chkqueue     = NewQueue(1, QueuePanicHandler(noopPanicHandler))
 
   w.initWorker()
   return w
