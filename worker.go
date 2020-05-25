@@ -13,6 +13,7 @@ type Worker interface {
   ShutdownAndWait()
   Enqueue(interface{}) bool
   CloseEnqueue()       bool
+  ForceCancel()
 }
 
 type WorkerHandler func(parameter interface{})
@@ -35,6 +36,7 @@ type defaultWorker struct {
   closed   int32
   wg       *sync.WaitGroup
 }
+
 // run background
 func NewDefaultWorker(handler WorkerHandler) *defaultWorker {
   w         := new(defaultWorker)
@@ -45,9 +47,11 @@ func NewDefaultWorker(handler WorkerHandler) *defaultWorker {
   w.wg       = new(sync.WaitGroup)
   return w
 }
+
 func (w *defaultWorker) PanicHandler(handler PanicHandler) {
   w.queue.PanicHandler(handler)
 }
+
 func (w *defaultWorker) Run(parent context.Context) {
   if parent == nil {
     parent = context.Background()
@@ -66,18 +70,23 @@ func (w *defaultWorker) Run(parent context.Context) {
     }
   }(ctx))
 }
+
+func (w *defaultWorker) ForceCancel() {
+  w.cancel()
+}
+
 // release channels and executor goroutine
 func (w *defaultWorker) Shutdown() {
   w.CloseEnqueue()
-  w.cancel()
   w.executor.Release()
 }
+
 func (w *defaultWorker) ShutdownAndWait() {
   w.CloseEnqueue()
-  w.cancel()
   w.wg.Wait()
   w.executor.ReleaseAndWait()
 }
+
 func (w *defaultWorker) CloseEnqueue() bool {
   if w.tryQueueClose() {
     w.queue.Close()
@@ -85,13 +94,16 @@ func (w *defaultWorker) CloseEnqueue() bool {
   }
   return false
 }
+
 func (w *defaultWorker) tryQueueClose() bool {
   return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
 }
+
 // enqueue parameter w/ blocking until handler running
 func (w *defaultWorker) Enqueue(param interface{}) bool {
   return w.queue.Enqueue(param)
 }
+
 func (w *defaultWorker) runloop(ctx context.Context) {
   defer w.wg.Done()
   for {
@@ -118,18 +130,11 @@ type bufferWorker struct {
   defaultWorker
 }
 
-func NewBufferWorker(handler WorkerHandler, minWorker, maxWorker int) *bufferWorker {
-  if minWorker < 2 {
-    minWorker = 2
-  }
-  if maxWorker < minWorker {
-    maxWorker = minWorker
-  }
-
+func NewBufferWorker(handler WorkerHandler) *bufferWorker {
   w         := new(bufferWorker)
   w.queue    = NewQueue(0)
   w.handler  = handler
-  w.executor = CreateExecutor(minWorker, maxWorker)
+  w.executor = CreateExecutor(2, 2) // checker + dequeue
   w.closed   = workerEnqueueInit
   w.wg       = new(sync.WaitGroup)
   return w
@@ -162,16 +167,18 @@ func (w *bufferWorker) Run(parent context.Context) {
   <-boot
 }
 
+func (w *bufferWorker) ForceCancel() {
+  w.cancel()
+}
+
 // release channels and executor goroutine
 func (w *bufferWorker) Shutdown() {
   w.CloseEnqueue()
-  w.cancel()
   w.executor.Release()
 }
 
 func (w *bufferWorker) ShutdownAndWait() {
   w.CloseEnqueue()
-  w.cancel()
   w.wg.Wait()
   w.executor.ReleaseAndWait()
 }
@@ -192,6 +199,7 @@ func (w *bufferWorker) tryQueueClose() bool {
 func (w *bufferWorker) Enqueue(param interface{}) bool {
   return w.queue.Enqueue(param)
 }
+
 func (w *bufferWorker) exec(parameters []interface{}, done func()) {
   defer done()
 
@@ -199,6 +207,7 @@ func (w *bufferWorker) exec(parameters []interface{}, done func()) {
     w.handler(param)
   }
 }
+
 func (w *bufferWorker) runloop(ctx context.Context) {
   defer w.wg.Done()
 

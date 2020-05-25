@@ -89,6 +89,7 @@ func CreateExecutor(minWorker, maxWorker int, opts ...ExecutorOption) *Executor 
   e.initWorker()
   return e
 }
+
 func (e *Executor) initWorker() {
   e.mutex.Lock()
   defer e.mutex.Unlock()
@@ -108,29 +109,37 @@ func (e *Executor) initWorker() {
   e.wg.Add(1)
   go e.healthloop(hctx, e.jobs)
 }
+
 func (e *Executor) callPanicHandler(pt PanicType, rcv interface{}) {
   e.panicHandler(pt, rcv)
 }
+
 func (e *Executor) increRunning() {
   atomic.AddInt32(&e.runningNum, 1)
 }
+
 func (e *Executor) decreRunning() {
   atomic.AddInt32(&e.runningNum, -1)
 }
+
 // return num of running workers
 func (e *Executor) Running() int32 {
   return atomic.LoadInt32(&e.runningNum)
 }
+
 func (e *Executor) increWorker() int32 {
   return atomic.AddInt32(&e.workerNum, 1)
 }
+
 func (e *Executor) decreWorker() int32 {
   return atomic.AddInt32(&e.workerNum, -1)
 }
+
 // return num of goroutines
 func (e *Executor) Workers() int32 {
   return atomic.LoadInt32(&e.workerNum)
 }
+
 func (e *Executor) startOndemand() {
   next := int(e.increWorker())
   if e.minWorker < next {
@@ -148,6 +157,7 @@ func (e *Executor) startOndemand() {
   }
   e.decreWorker()
 }
+
 // enqueue job
 func (e *Executor) Submit(fn Job) {
   defer func(){
@@ -163,10 +173,15 @@ func (e *Executor) Submit(fn Job) {
   e.startOndemand()
   e.jobs.Enqueue(fn)
 }
+
 func (e *Executor) ForceStop() {
+  e.mutex.Lock()
+  defer e.mutex.Unlock()
+
   for _, cancel := range e.jobCancel {
     cancel()
   }
+  e.jobCancel = e.jobCancel[len(e.jobCancel):]
 }
 
 // release goroutines
@@ -180,10 +195,12 @@ func (e *Executor) Release() {
   e.healthCancel()
   e.jobs.Close()
 }
+
 func (e *Executor) ReleaseAndWait() {
   e.Release()
   e.wg.Wait()
 }
+
 func (e *Executor) releaseJob(reduceSize int) {
   e.mutex.Lock()
   defer e.mutex.Unlock()
@@ -200,6 +217,7 @@ func (e *Executor) releaseJob(reduceSize int) {
     cancel()
   }
 }
+
 func (e *Executor) healthloop(ctx context.Context, jobs *Queue) {
   defer e.wg.Done()
   defer func(){
@@ -226,6 +244,7 @@ func (e *Executor) healthloop(ctx context.Context, jobs *Queue) {
     }
   }
 }
+
 func (e *Executor) execloop(ctx context.Context, jobs *Queue) {
   defer e.wg.Done()
   defer func(){
