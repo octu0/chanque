@@ -39,7 +39,7 @@ type Pipeline struct {
   outFunc      PipelineOutputFunc
 }
 
-func CreatePipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...PipelineOptionFunc) *Pipeline {
+func NewPipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...PipelineOptionFunc) *Pipeline {
   opt:= new(PipelineOption)
   for _, fn := range opts {
     fn(opt)
