@@ -58,7 +58,7 @@ type Executor struct {
   workerNum       int32
 }
 
-func CreateExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executor {
+func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executor {
   opt := new(ExecutorOption)
   for _, fn := range funcs {
     fn(opt)

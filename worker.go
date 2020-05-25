@@ -73,7 +73,7 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *default
   w             := new(defaultWorker)
   w.queue        = NewQueue(0, QueuePanicHandler(opt.panicHandler))
   w.handler      = handler
-  w.executor     = CreateExecutor(1, 1)
+  w.executor     = NewExecutor(1, 1)
   w.closed       = workerEnqueueInit
   w.wg           = new(sync.WaitGroup)
   w.ctx          = ctx
@@ -173,7 +173,7 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWo
   w             := new(bufferWorker)
   w.queue        = NewQueue(0, QueuePanicHandler(opt.panicHandler))
   w.handler      = handler
-  w.executor     = CreateExecutor(2, 2) // checker + dequeue
+  w.executor     = NewExecutor(2, 2) // checker + dequeue
   w.closed       = workerEnqueueInit
   w.wg           = new(sync.WaitGroup)
   w.ctx          = ctx
