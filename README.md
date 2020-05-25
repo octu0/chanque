@@ -41,18 +41,17 @@ func main(){
     }
   }()
   if ok := que1.Enqueue("hello"); ok {
-    fmt.Println("enqueue-ed")
+    fmt.Println("enqueue")
   }
 
-  que2 := chanque.NewQueue(10)
-  que2.PanicHandler(func(rcv interface{}, ret *bool) {
-    switch err.(type) {
-    case error:
-      fmt.Println("panic occurred")
-    }
-  })
+  que2 := chanque.NewQueue(10,
+    QueuePanicHandler(func(pt chanque.PanicType, rcv interface{}) {
+      fmt.Println("panic occurred", rcv.(error))
+    }),
+  )
+  defer que2.Close()
   if ok := que2.EnqueueNB("world w/ non-blocking enqueue"); ok {
-    fmt.Println("enqueue-ed")
+    fmt.Println("enqueue")
   }
 }
 ```
@@ -72,7 +71,7 @@ import(
 
 func main(){
   // minWorker 1 maxWorker 2 
-  exec := chanque.CreateExecutor(1, 2) 
+  exec := chanque.NewExecutor(1, 2) 
   defer exec.Release()
 
   exec.Submit(func(){
@@ -93,7 +92,7 @@ func main(){
   // Generate goroutines on demand up to the maximum number of workers.
   // Submit does not block up to the size of MaxCapacity
   // Workers that are not running are recycled to minWorker at the time of ReduceInterval.
-  exec2 := chanque.CreateExecutor(10, 50,
+  exec2 := chanque.NewExecutor(10, 50,
     chanque.ExecutorMaxCapacicy(1000),
     chanque.ExecutorReducderInterval(60 * time.Second),
   )
@@ -133,21 +132,19 @@ func main(){
     time.Sleep(1 * time.Second)
   }
   w1 := chanque.NewDefaultWorker(handler)
-  w1.Run(context.TODO())
   defer w1.Shutdown()
 
   go func(){
     w1.Enqueue("hello")
-    w1.Enqueue("world") // blocking for 1 sec
+    w1.Enqueue("world") // blocking during 1 sec
   }()
 
-  w2 := chanque.NewBufferWorker(handler, 10)
-  w2.Run(context.TODO())
+  w2 := chanque.NewBufferWorker(handler)
   defer w2.Shutdown()
 
   go func(){
     w2.Enqueue("hello")
-    w2.Enqueue("world") // non-blocking until free capacity
+    w2.Enqueue("world") // non-blocking
   }()
 }
 ```
@@ -175,19 +172,17 @@ func main(){
     }
     return -1, fmt.Errorf("invalid parameter")
   }
-  outFn := func(paramter interface{}) error {
-    if val, ok := parameter.(int); ok {
-      fmt.Println("value =", val)
-      return nil
+  outFn := func(result interface{}, err error) {
+    if err != nil {
+       fmt.Fatal(err)
+       return
     }
-    return fmt.Errorf("invalid parameter")
+
+    fmt.Println("value =", parameter.(int))
   }
 
   // minWorker 2 maxWorker 10
-  pipe := chanque.CreatePipeline(2, 10, calcFn, outFn,
-    PipelineMaxCapacity(100),
-  )
-
+  pipe := chanque.NewPipeline(calcFn, outFn)
   pipe.Enqueue(10)
   pipe.Enqueue(20)
   pipe.Enqueue(30)
@@ -200,7 +195,7 @@ func main(){
 ### type `Queue`
 
 ```
-NewQueue(capacity int) *Queue
+NewQueue(capacity int, fn ...QueueOptionFunc) *Queue
 
 func(*Queue) Enqueue(value interface{}) (written bool)
 func(*Queue) EnqueueNB(value interface{}) (written bool)
@@ -209,6 +204,8 @@ func(*Queue) EnqueueRetry(value interface{}, interval time.Duration, retry int) 
 func(*Queue) Dequeue() (value interface{}, found bool)
 func(*Queue) DequeueNB() (value interface{}, found bool)
 func(*Queue) DequeueRetry(interval time.Duration, retry int) (value interface{}, found bool)
+
+func(*Queue) Close() (closed bool)
 ```
 
 ### type `Executor`
@@ -216,7 +213,7 @@ func(*Queue) DequeueRetry(interval time.Duration, retry int) (value interface{},
 ```
 type Job func()
 
-CreateExecutor(minWorker, maxWorker int) *Executor
+CreateExecutor(minWorker, maxWorker int, fn ...ExecutorOptionFunc) *Executor
 
 func(*Executor) Submit(Job)
 func(*Executor) Release()
@@ -230,20 +227,22 @@ func(*Executor) Workers() int32
 ```
 type WorkerHandler func(parameter interface{})
 
-NewDefaultWorker(handler WorkerHandler)
-NewBufferWorker(handler WorkerHandler, minWorker, maxWorker int)
+NewDefaultWorker(handler WorkerHandler, fn ...WorkerOptionFunc)
+NewBufferWorker(handler WorkerHandler, fn ...WorkerOptionFunc)
 
-func(Worker) Run(context.Context)
 func(Worker) Enqueue(parameter interface{}) bool
+func(Worker) CloseEnqueue() bool
 func(Worker) Shutdown()
+func(Worker) ShutdownAndWait()
 ```
 
 ### type `Pipeline`
 
 ```
-CreatePipeline(minWorker, maxWorker int, PipelineInputFunc, PipelineOutputFunc) *Pipeline
+CreatePipeline(PipelineInputFunc, PipelineOutputFunc, fn ...PipelineOptionFunc) *Pipeline
 
-func(*Pipeline) Enqueue(interface)
+func(*Pipeline) Enqueue(parameter interface{}) bool
+func(*Pipeline) CloseEnqueue() bool
 func(*Pipeline) Shutdown()
 func(*Pipeline) ShutdownAndWait()
 ```
