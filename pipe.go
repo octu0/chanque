@@ -107,6 +107,10 @@ func (p *Pipeline) Enqueue(parameter interface{}) bool {
   return true
 }
 
+func (p *Pipeline) CloseEnqueue() bool {
+  return p.parameters.CloseEnqueue()
+}
+
 func (p *Pipeline) Shutdown() {
   p.parameters.Shutdown()
   p.inWorker.Shutdown()
