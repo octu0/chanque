@@ -5,18 +5,54 @@ import(
   "sync"
   "sync/atomic"
 )
-
 type Worker interface {
-  PanicHandler(PanicHandler)
-  Run(context.Context)
-  Shutdown()
-  ShutdownAndWait()
   Enqueue(interface{}) bool
   CloseEnqueue()       bool
-  ForceCancel()
+  Shutdown()
+  ShutdownAndWait()
+  ForceStop()
 }
 
-type WorkerHandler func(parameter interface{})
+type WorkerHandler    func(parameter interface{})
+
+type WorkerHook       func()
+
+func noopWorkerHook() {
+  /* noop */
+}
+
+type WorkerOptionFunc func(*WorkerOption)
+
+type WorkerOption struct {
+  ctx           context.Context
+  panicHandler  PanicHandler
+  preHook       WorkerHook
+  postHook      WorkerHook
+}
+
+func WorkerContext(ctx context.Context) WorkerOptionFunc {
+  return func(opt *WorkerOption) {
+    opt.ctx = ctx
+  }
+}
+
+func WorkerPanicHandler(handler PanicHandler) WorkerOptionFunc {
+  return func(opt *WorkerOption) {
+    opt.panicHandler = handler
+  }
+}
+
+func WorkerPreHook(hook WorkerHook) WorkerOptionFunc {
+  return func(opt *WorkerOption) {
+    opt.preHook = hook
+  }
+}
+
+func WorkerPostHook(hook WorkerHook) WorkerOptionFunc {
+  return func(opt *WorkerOption) {
+    opt.postHook = hook
+  }
+}
 
 // cople check
 var(
@@ -29,49 +65,60 @@ const(
 )
 
 type defaultWorker struct {
-  queue    *Queue
-  handler  WorkerHandler
-  cancel   context.CancelFunc
-  executor *Executor
-  closed   int32
-  wg       *sync.WaitGroup
+  queue        *Queue
+  handler      WorkerHandler
+  executor     *Executor
+  closed       int32
+  wg           *sync.WaitGroup
+  ctx          context.Context
+  cancel       context.CancelFunc
+  panicHandler PanicHandler
+  preHook      WorkerHook
+  postHook     WorkerHook
 }
 
 // run background
-func NewDefaultWorker(handler WorkerHandler) *defaultWorker {
-  w         := new(defaultWorker)
-  w.queue    = NewQueue(0)
-  w.handler  = handler
-  w.executor = CreateExecutor(1, 1)
-  w.closed   = workerEnqueueInit
-  w.wg       = new(sync.WaitGroup)
+func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *defaultWorker {
+  opt := new(WorkerOption)
+  for _, fn := range funcs {
+    fn(opt)
+  }
+  if opt.ctx == nil {
+    opt.ctx = context.Background()
+  }
+  if opt.panicHandler == nil {
+    opt.panicHandler = defaultPanicHandler
+  }
+  if opt.preHook == nil {
+    opt.preHook = noopWorkerHook
+  }
+  if opt.postHook == nil {
+    opt.postHook = noopWorkerHook
+  }
+
+  ctx, cancel   := context.WithCancel(opt.ctx)
+  w             := new(defaultWorker)
+  w.queue        = NewQueue(0, QueuePanicHandler(opt.panicHandler))
+  w.handler      = handler
+  w.executor     = NewExecutor(1, 1)
+  w.closed       = workerEnqueueInit
+  w.wg           = new(sync.WaitGroup)
+  w.ctx          = ctx
+  w.cancel       = cancel
+  w.panicHandler = opt.panicHandler
+  w.preHook      = opt.preHook
+  w.postHook     = opt.postHook
+
+  w.initWorker()
   return w
 }
 
-func (w *defaultWorker) PanicHandler(handler PanicHandler) {
-  w.queue.PanicHandler(handler)
-}
-
-func (w *defaultWorker) Run(parent context.Context) {
-  if parent == nil {
-    parent = context.Background()
-  }
-
-  ctx, cancel := context.WithCancel(parent)
-  if w.cancel != nil {
-    w.cancel()
-  }
-  w.cancel = cancel
-
+func (w *defaultWorker) initWorker() {
   w.wg.Add(1)
-  w.executor.Submit(func(c context.Context) Job {
-    return func() {
-      w.runloop(c)
-    }
-  }(ctx))
+  w.executor.Submit(w.runloop)
 }
 
-func (w *defaultWorker) ForceCancel() {
+func (w *defaultWorker) ForceStop() {
   w.cancel()
 }
 
@@ -104,11 +151,11 @@ func (w *defaultWorker) Enqueue(param interface{}) bool {
   return w.queue.Enqueue(param)
 }
 
-func (w *defaultWorker) runloop(ctx context.Context) {
+func (w *defaultWorker) runloop() {
   defer w.wg.Done()
   for {
     select {
-    case <-ctx.Done():
+    case <-w.ctx.Done():
       return
 
     case param, ok := <-w.queue.Chan():
@@ -116,7 +163,9 @@ func (w *defaultWorker) runloop(ctx context.Context) {
         return
       }
 
+      w.preHook()
       w.handler(param)
+      w.postHook()
     }
   }
 }
@@ -126,48 +175,58 @@ var(
   _ Worker = (*bufferWorker)(nil)
 )
 
-type bufferWorker struct {
-  defaultWorker
+func bufferExecNoopDone() {
+  /* noop */
 }
 
-func NewBufferWorker(handler WorkerHandler) *bufferWorker {
-  w         := new(bufferWorker)
-  w.queue    = NewQueue(0)
-  w.handler  = handler
-  w.executor = CreateExecutor(2, 2) // checker + dequeue
-  w.closed   = workerEnqueueInit
-  w.wg       = new(sync.WaitGroup)
+type bufferWorker struct {
+  defaultWorker
+  chkqueue  *Queue
+}
+
+func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWorker {
+  opt := new(WorkerOption)
+  for _, fn := range funcs {
+    fn(opt)
+  }
+  if opt.ctx == nil {
+    opt.ctx = context.Background()
+  }
+  if opt.panicHandler == nil {
+    opt.panicHandler = defaultPanicHandler
+  }
+  if opt.preHook == nil {
+    opt.preHook = noopWorkerHook
+  }
+  if opt.postHook == nil {
+    opt.postHook = noopWorkerHook
+  }
+
+  ctx, cancel   := context.WithCancel(opt.ctx)
+  w             := new(bufferWorker)
+  w.queue        = NewQueue(0, QueuePanicHandler(opt.panicHandler))
+  w.handler      = handler
+  w.executor     = NewExecutor(2, 2) // checker + dequeue
+  w.closed       = workerEnqueueInit
+  w.wg           = new(sync.WaitGroup)
+  w.ctx          = ctx
+  w.cancel       = cancel
+  w.panicHandler = opt.panicHandler
+  w.preHook      = opt.preHook
+  w.postHook     = opt.postHook
+  w.chkqueue     = NewQueue(1, QueuePanicHandler(noopPanicHandler))
+
+  w.initWorker()
   return w
 }
 
-func (w *bufferWorker) PanicHandler(handler PanicHandler) {
-  w.queue.PanicHandler(handler)
-}
-
 // run background
-func (w *bufferWorker) Run(parent context.Context) {
-  if parent == nil {
-    parent = context.Background()
-  }
-
-  ctx, cancel := context.WithCancel(parent)
-  if w.cancel != nil {
-    w.cancel()
-  }
-  w.cancel = cancel
-
-  boot := make(chan struct{})
+func (w *bufferWorker) initWorker() {
   w.wg.Add(1)
-  w.executor.Submit(func(c context.Context, b chan struct{}) Job {
-    return func(){
-      b <-struct{}{}
-      w.runloop(c)
-    }
-  }(ctx, boot))
-  <-boot
+  w.executor.Submit(w.runloop)
 }
 
-func (w *bufferWorker) ForceCancel() {
+func (w *bufferWorker) ForceStop() {
   w.cancel()
 }
 
@@ -200,26 +259,26 @@ func (w *bufferWorker) Enqueue(param interface{}) bool {
   return w.queue.Enqueue(param)
 }
 
+// execute handler from queue
 func (w *bufferWorker) exec(parameters []interface{}, done func()) {
   defer done()
 
+  w.preHook()
   for _, param := range parameters {
     w.handler(param)
   }
+  w.postHook()
 }
 
-func (w *bufferWorker) runloop(ctx context.Context) {
+func (w *bufferWorker) runloop() {
   defer w.wg.Done()
-
-  chkqueue := NewQueue(1)
-  chkqueue.PanicHandler(noopPanicHandler)
-  defer chkqueue.Close()
+  defer w.chkqueue.Close()
 
   check := func(c *Queue) Job {
     return func(){
       c.EnqueueNB(struct{}{})
     }
-  }(chkqueue)
+  }(w.chkqueue)
 
   genExec := func(q []interface{}, done func()) Job {
     return func(){
@@ -230,10 +289,10 @@ func (w *bufferWorker) runloop(ctx context.Context) {
   buffer := make([]interface{}, 0)
   for {
     select {
-    case <-ctx.Done():
+    case <-w.ctx.Done():
       return
 
-    case <-chkqueue.Chan():
+    case <-w.chkqueue.Chan():
       if len(buffer) < 1 {
         continue
       }
@@ -246,9 +305,7 @@ func (w *bufferWorker) runloop(ctx context.Context) {
     case param, ok :=<-w.queue.Chan():
       if ok != true {
         if 0 < len(buffer) {
-          w.executor.Submit(genExec(buffer, func(){
-            /* nop done */
-          }))
+          w.executor.Submit(genExec(buffer, bufferExecNoopDone))
         }
         return
       }

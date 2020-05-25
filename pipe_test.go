@@ -35,7 +35,7 @@ func TestPipelineSequencial(t *testing.T) {
     idx := result.(int)
     b[idx] = idx
   }
-  p := CreatePipeline(in, out,
+  p := NewPipeline(in, out,
     PipelinePanicHandler(func(a PanicType, b interface{}){
       /* nopp */
     }),
@@ -170,7 +170,7 @@ func TestPipelineInOutParameter(t *testing.T) {
 
   for _, tuple := range tuples {
     t.Run(tuple.name, func(tt *testing.T) {
-      p := CreatePipeline(tuple.in(tt), tuple.out(tt),
+      p := NewPipeline(tuple.in(tt), tuple.out(tt),
         PipelinePanicHandler(func(a PanicType, b interface{}){
           /* nopp */
         }),

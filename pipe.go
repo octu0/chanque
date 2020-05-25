@@ -39,7 +39,7 @@ type Pipeline struct {
   outFunc      PipelineOutputFunc
 }
 
-func CreatePipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...PipelineOptionFunc) *Pipeline {
+func NewPipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...PipelineOptionFunc) *Pipeline {
   opt:= new(PipelineOption)
   for _, fn := range opts {
     fn(opt)
@@ -52,21 +52,10 @@ func CreatePipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts .
   p.done       = new(sync.WaitGroup)
   p.inFunc     = inFunc
   p.outFunc    = outFunc
-  p.parameters = NewBufferWorker(p.workerPrepare)
-  p.parameters.PanicHandler(opt.panicHandler)
-  p.parameters.Run(nil)
-
-  p.inWorker   = NewBufferWorker(p.workerIn)
-  p.inWorker.PanicHandler(opt.panicHandler)
-  p.inWorker.Run(nil)
-
-  p.outWorker  = NewBufferWorker(p.workerOut)
-  p.outWorker.PanicHandler(opt.panicHandler)
-  p.outWorker.Run(nil)
-
-  p.doneWorker = NewBufferWorker(p.workerDone)
-  p.doneWorker.PanicHandler(opt.panicHandler)
-  p.doneWorker.Run(nil)
+  p.parameters = NewBufferWorker(p.workerPrepare, WorkerPanicHandler(opt.panicHandler))
+  p.inWorker   = NewBufferWorker(p.workerIn, WorkerPanicHandler(opt.panicHandler))
+  p.outWorker  = NewBufferWorker(p.workerOut, WorkerPanicHandler(opt.panicHandler))
+  p.doneWorker = NewBufferWorker(p.workerDone, WorkerPanicHandler(opt.panicHandler))
 
   return p
 }
@@ -116,6 +105,10 @@ func (p *Pipeline) Enqueue(parameter interface{}) bool {
     return false
   }
   return true
+}
+
+func (p *Pipeline) CloseEnqueue() bool {
+  return p.parameters.CloseEnqueue()
 }
 
 func (p *Pipeline) Shutdown() {

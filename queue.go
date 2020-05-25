@@ -4,20 +4,37 @@ import(
   "time"
 )
 
-type Queue struct {
-  ch         chan interface{}
-  pncHandler PanicHandler
+type QueueOptionFunc func(*QueueOption)
+
+type QueueOption struct {
+  panicHandler  PanicHandler
 }
 
-func NewQueue(c int) *Queue {
-  return &Queue{
-    ch:         make(chan interface{}, c),
-    pncHandler: defaultPanicHandler,
+func QueuePanicHandler(handler PanicHandler) QueueOptionFunc {
+  return func(opt *QueueOption) {
+    opt.panicHandler = handler
   }
 }
 
-func (q *Queue) PanicHandler(handler PanicHandler) {
-  q.pncHandler = handler
+type Queue struct {
+  ch           chan interface{}
+  panicHandler PanicHandler
+}
+
+func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
+  opt := new(QueueOption)
+  for _, fn := range funcs {
+    fn(opt)
+  }
+
+  if opt.panicHandler == nil {
+    opt.panicHandler = defaultPanicHandler
+  }
+
+  q             := new(Queue)
+  q.ch           = make(chan interface{}, c)
+  q.panicHandler = opt.panicHandler
+  return q
 }
 
 func (q *Queue) Chan() <-chan interface{} {
@@ -27,9 +44,7 @@ func (q *Queue) Chan() <-chan interface{} {
 func (q *Queue) Close() (closed bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
-      if q.pncHandler != nil {
-        q.pncHandler(PanicTypeClose, rcv)
-      }
+      q.panicHandler(PanicTypeClose, rcv)
       closed = false
     }
   }()
@@ -43,9 +58,7 @@ func (q *Queue) Close() (closed bool) {
 func (q *Queue) Enqueue(val interface{}) (write bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
-      if q.pncHandler != nil {
-        q.pncHandler(PanicTypeEnqueue, rcv)
-      }
+      q.panicHandler(PanicTypeEnqueue, rcv)
       write = false
     }
   }()
@@ -59,9 +72,7 @@ func (q *Queue) Enqueue(val interface{}) (write bool) {
 func (q *Queue) EnqueueNB(val interface{}) (write bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
-      if q.pncHandler != nil {
-        q.pncHandler(PanicTypeEnqueue, rcv)
-      }
+      q.panicHandler(PanicTypeEnqueue, rcv)
       write = false
     }
   }()
@@ -93,9 +104,7 @@ func (q *Queue) EnqueueRetry(val interface{}, retryInterval time.Duration, retry
 func (q *Queue) Dequeue() (val interface{}, found bool) {
   defer func(){
     if rcv := recover(); rcv != nil {
-      if q.pncHandler != nil {
-        q.pncHandler(PanicTypeDequeue, rcv)
-      }
+      q.panicHandler(PanicTypeDequeue, rcv)
       found = false
     }
   }()

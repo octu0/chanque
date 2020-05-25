@@ -4,6 +4,7 @@ import(
   "testing"
   "time"
   "sync"
+  "strings"
   "math/rand"
 )
 
@@ -23,7 +24,6 @@ func TestWorkerSequence(t *testing.T) {
       time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
     }
     w := NewDefaultWorker(h)
-    w.Run(nil)
     for i := 0; i < s; i += 1 {
       w.Enqueue(i)
     }
@@ -53,8 +53,7 @@ func TestWorkerSequence(t *testing.T) {
 
       time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
     }
-    w := NewBufferWorker(h)
-    w.Run(nil)
+    w := NewBufferWorker(h, WorkerPanicHandler(noopPanicHandler))
     for i := 0; i < s; i += 1 {
       w.Enqueue(i)
     }
@@ -72,6 +71,102 @@ func TestWorkerSequence(t *testing.T) {
   })
 }
 
+func TestWorkerPrePostHook(t *testing.T) {
+  t.Run("default", func(tt *testing.T) {
+    logs := make([]string, 0)
+    pre := func(){
+      logs = append(logs, "begin")
+    }
+    post := func(){
+      logs = append(logs, "commit")
+    }
+    handler := func(param interface{}) {
+      time.Sleep(10 * time.Millisecond)
+      logs = append(logs, "insert", param.(string))
+    }
+    w := NewDefaultWorker(handler,
+      WorkerPreHook(pre),
+      WorkerPostHook(post),
+    )
+    w.Enqueue("100")
+    w.Enqueue("200")
+    w.Enqueue("300")
+    w.ShutdownAndWait()
+
+    beginCount  := 0
+    insertCount := 0
+    commitCount := 0
+    for _, val := range logs {
+      switch val {
+      case "begin":
+        beginCount += 1
+      case "insert":
+        insertCount += 1
+      case "commit":
+        commitCount += 1
+      }
+    }
+    if (beginCount == insertCount && commitCount == insertCount) != true {
+      t.Errorf("same times b:%d i:%d c:%d", beginCount, insertCount, commitCount)
+    }
+
+    expect := []string{
+      "begin",
+      "insert", "100",
+      "commit",
+      "begin",
+      "insert", "200",
+      "commit",
+      "begin",
+      "insert", "300",
+      "commit",
+    }
+    expectStr := strings.Join(expect, ",")
+    actualStr := strings.Join(logs, ",")
+    if expectStr != actualStr {
+      tt.Errorf("expect %s != actual %s", expectStr, actualStr)
+    }
+  })
+  t.Run("buffer", func(tt *testing.T) {
+    logs := make([]string, 0)
+    pre := func(){
+      logs = append(logs, "begin")
+    }
+    post := func(){
+      logs = append(logs, "commit")
+    }
+    handler := func(param interface{}) {
+      time.Sleep(10 * time.Millisecond)
+      logs = append(logs, "insert", param.(string))
+    }
+    w := NewBufferWorker(handler,
+      WorkerPreHook(pre),
+      WorkerPostHook(post),
+    )
+    for i := 0; i < 10; i += 1 {
+      w.Enqueue("1")
+    }
+    w.ShutdownAndWait()
+
+    beginCount  := 0
+    insertCount := 0
+    commitCount := 0
+    for _, val := range logs {
+      switch val {
+      case "begin":
+        beginCount += 1
+      case "insert":
+        insertCount += 1
+      case "commit":
+        commitCount += 1
+      }
+    }
+    if (beginCount < insertCount && commitCount < insertCount) != true {
+      t.Errorf("begin and commit less than insert  b:%d i:%d c:%d", beginCount, insertCount, commitCount)
+    }
+  })
+}
+
 func TestDefaultWorkerShutdownAndWait(t *testing.T) {
   t.Run("1-1", func(tt *testing.T) {
     h := func(p interface{}) {
@@ -79,7 +174,6 @@ func TestDefaultWorkerShutdownAndWait(t *testing.T) {
       tt.Logf("val = %v", p)
     }
     w := NewDefaultWorker(h)
-    w.Run(nil)
     w.Enqueue(10)
     w.Enqueue(20)
     w.Enqueue(30)
@@ -90,7 +184,6 @@ func TestDefaultWorkerShutdownAndWait(t *testing.T) {
       time.Sleep(10 * time.Millisecond)
     }
     w := NewDefaultWorker(h)
-    w.Run(nil)
     for i := 0; i < 10; i += 1 {
       w.Enqueue(i)
     }
@@ -104,8 +197,7 @@ func TestBufferWorkerShutdownAndWait(t *testing.T) {
       time.Sleep(10 * time.Millisecond)
       tt.Logf("val = %v", p)
     }
-    w := NewBufferWorker(h)
-    w.Run(nil)
+    w := NewBufferWorker(h, WorkerPanicHandler(noopPanicHandler))
     w.Enqueue(10)
     w.Enqueue(20)
     w.Enqueue(30)
@@ -115,8 +207,7 @@ func TestBufferWorkerShutdownAndWait(t *testing.T) {
     h := func(p interface{}) {
       time.Sleep(10 * time.Millisecond)
     }
-    w := NewBufferWorker(h)
-    w.Run(nil)
+    w := NewBufferWorker(h, WorkerPanicHandler(noopPanicHandler))
     for i := 0; i < 10; i += 1 {
       w.Enqueue(i)
     }
