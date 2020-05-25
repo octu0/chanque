@@ -146,6 +146,26 @@ func main(){
     w2.Enqueue("hello")
     w2.Enqueue("world") // non-blocking
   }()
+
+  // BufferWorker provides helpers for performing sequential operations
+  // by using PreHook and PostHook to perform the operations collectively.
+  pre := func(){
+    db.Begin()
+  }
+  post := func(){
+    db.Commit()
+  }
+  hnd := func(param interface{}) {
+    db.Insert(param.(string))
+  }
+  w3 := chanque.NewBufferWorker(hnd,
+    WorkerPreHook(pre),
+    WorkerPostHook(post),
+  )
+  for i := 0; i < 100; i += 1 {
+    w3.Enqueue(strconv.Itoa(i))
+  }
+  w3.ShutdownAndWait()
 }
 ```
 

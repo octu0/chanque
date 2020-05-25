@@ -5,12 +5,29 @@ import(
   "sync"
   "sync/atomic"
 )
+type Worker interface {
+  Enqueue(interface{}) bool
+  CloseEnqueue()       bool
+  Shutdown()
+  ShutdownAndWait()
+  ForceStop()
+}
+
+type WorkerHandler    func(parameter interface{})
+
+type WorkerHook       func()
+
+func noopWorkerHook() {
+  /* noop */
+}
 
 type WorkerOptionFunc func(*WorkerOption)
 
 type WorkerOption struct {
-  ctx             context.Context
-  panicHandler PanicHandler
+  ctx           context.Context
+  panicHandler  PanicHandler
+  preHook       WorkerHook
+  postHook      WorkerHook
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -25,15 +42,17 @@ func WorkerPanicHandler(handler PanicHandler) WorkerOptionFunc {
   }
 }
 
-type Worker interface {
-  Enqueue(interface{}) bool
-  CloseEnqueue()       bool
-  Shutdown()
-  ShutdownAndWait()
-  ForceStop()
+func WorkerPreHook(hook WorkerHook) WorkerOptionFunc {
+  return func(opt *WorkerOption) {
+    opt.preHook = hook
+  }
 }
 
-type WorkerHandler func(parameter interface{})
+func WorkerPostHook(hook WorkerHook) WorkerOptionFunc {
+  return func(opt *WorkerOption) {
+    opt.postHook = hook
+  }
+}
 
 // cople check
 var(
@@ -54,6 +73,8 @@ type defaultWorker struct {
   ctx          context.Context
   cancel       context.CancelFunc
   panicHandler PanicHandler
+  preHook      WorkerHook
+  postHook     WorkerHook
 }
 
 // run background
@@ -68,6 +89,12 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *default
   if opt.panicHandler == nil {
     opt.panicHandler = defaultPanicHandler
   }
+  if opt.preHook == nil {
+    opt.preHook = noopWorkerHook
+  }
+  if opt.postHook == nil {
+    opt.postHook = noopWorkerHook
+  }
 
   ctx, cancel   := context.WithCancel(opt.ctx)
   w             := new(defaultWorker)
@@ -79,6 +106,8 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *default
   w.ctx          = ctx
   w.cancel       = cancel
   w.panicHandler = opt.panicHandler
+  w.preHook      = opt.preHook
+  w.postHook     = opt.postHook
 
   w.initWorker()
   return w
@@ -86,11 +115,7 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *default
 
 func (w *defaultWorker) initWorker() {
   w.wg.Add(1)
-  w.executor.Submit(func(c context.Context) Job {
-    return func() {
-      w.runloop(c)
-    }
-  }(w.ctx))
+  w.executor.Submit(w.runloop)
 }
 
 func (w *defaultWorker) ForceStop() {
@@ -126,11 +151,11 @@ func (w *defaultWorker) Enqueue(param interface{}) bool {
   return w.queue.Enqueue(param)
 }
 
-func (w *defaultWorker) runloop(ctx context.Context) {
+func (w *defaultWorker) runloop() {
   defer w.wg.Done()
   for {
     select {
-    case <-ctx.Done():
+    case <-w.ctx.Done():
       return
 
     case param, ok := <-w.queue.Chan():
@@ -138,7 +163,9 @@ func (w *defaultWorker) runloop(ctx context.Context) {
         return
       }
 
+      w.preHook()
       w.handler(param)
+      w.postHook()
     }
   }
 }
@@ -168,6 +195,12 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWo
   if opt.panicHandler == nil {
     opt.panicHandler = defaultPanicHandler
   }
+  if opt.preHook == nil {
+    opt.preHook = noopWorkerHook
+  }
+  if opt.postHook == nil {
+    opt.postHook = noopWorkerHook
+  }
 
   ctx, cancel   := context.WithCancel(opt.ctx)
   w             := new(bufferWorker)
@@ -179,6 +212,8 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWo
   w.ctx          = ctx
   w.cancel       = cancel
   w.panicHandler = opt.panicHandler
+  w.preHook      = opt.preHook
+  w.postHook     = opt.postHook
   w.chkqueue     = NewQueue(1, QueuePanicHandler(noopPanicHandler))
 
   w.initWorker()
@@ -228,9 +263,11 @@ func (w *bufferWorker) Enqueue(param interface{}) bool {
 func (w *bufferWorker) exec(parameters []interface{}, done func()) {
   defer done()
 
+  w.preHook()
   for _, param := range parameters {
     w.handler(param)
   }
+  w.postHook()
 }
 
 func (w *bufferWorker) runloop() {
