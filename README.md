@@ -201,7 +201,6 @@ func main(){
     fmt.Println("value =", parameter.(int))
   }
 
-  // minWorker 2 maxWorker 10
   pipe := chanque.NewPipeline(calcFn, outFn)
   pipe.Enqueue(10)
   pipe.Enqueue(20)
