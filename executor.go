@@ -293,3 +293,33 @@ func (e *Executor) execloop(ctx context.Context, jobs *Queue) {
     }
   }
 }
+
+func (e *Executor) SubExecutor() *SubExecutor {
+  return newSubExecutor(e)
+}
+
+type SubExecutor struct {
+  parent *Executor
+  wg     *sync.WaitGroup
+}
+
+func newSubExecutor(parent *Executor) *SubExecutor {
+  s        := new(SubExecutor)
+  s.parent  = parent
+  s.wg      = new(sync.WaitGroup)
+  return s
+}
+
+func (s *SubExecutor) Submit(fn Job) {
+  s.wg.Add(1)
+  s.parent.Submit(func(w *sync.WaitGroup) Job {
+    return func(){
+      defer w.Done()
+      fn()
+    }
+  }(s.wg))
+}
+
+func (s *SubExecutor) Wait() {
+  s.wg.Wait()
+}

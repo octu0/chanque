@@ -651,3 +651,112 @@ func TestExecutorWorkerShrink(t *testing.T) {
     }
   })
 }
+
+func TestSubExecutor(t *testing.T) {
+  t.Run("parent max cap", func(tt *testing.T) {
+    e := NewExecutor(1, 10,
+      ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
+        /* nop */
+      }),
+    )
+    defer e.Release()
+    s := e.SubExecutor()
+
+    for i := 0; i < 10; i += 1 {
+      e.Submit(func(){
+        time.Sleep(50 * time.Millisecond)
+      })
+    }
+    latch := make(chan struct{})
+    done := make(chan struct{})
+    go func(l chan struct{}, d chan struct{}) {
+      <-l
+      s.Submit(func(){
+        tt.Logf("sub worker hello")
+      })
+      d <-struct{}{}
+    }(latch, done)
+
+    latch <-struct{}{}
+    select {
+    case <-time.After(10 * time.Millisecond):
+      t.Logf("blocking ok = parent capacity limit")
+    case <-done:
+      t.Errorf("reached capacity of parent")
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    latch2 := make(chan struct{})
+    done2  := make(chan struct{})
+    go func(l chan struct{}, d chan struct{}) {
+      <-l
+      s.Submit(func(){
+        tt.Logf("sub worker world")
+      })
+      d <-struct{}{}
+    }(latch2, done2)
+
+    latch2 <-struct{}{}
+    select {
+    case <-time.After(10 * time.Millisecond):
+      t.Errorf("parent free capacity")
+    case <-done2:
+      t.Logf("non blockging submit ok")
+    }
+  })
+  t.Run("wait", func(tt *testing.T) {
+    e := NewExecutor(1, 10,
+      ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
+        /* nop */
+      }),
+    )
+    defer e.Release()
+    s := e.SubExecutor()
+
+    parent := make(chan struct{})
+    e.Submit(func(d chan struct{}) func() {
+      return func(){
+        time.Sleep(50 * time.Millisecond)
+        tt.Logf("parent worker done")
+        d <-struct{}{}
+      }
+    }(parent))
+
+    for i := 0; i < 5; i += 1 {
+      s.Submit(func(){
+        time.Sleep(10 * time.Millisecond)
+      })
+    }
+
+    select {
+    case <-parent:
+      tt.Errorf("parent worker still run")
+    case <-time.After(1 * time.Millisecond):
+      tt.Logf("non blocking ok")
+    }
+
+    s.Wait()
+
+    r1 := e.Running()
+    if r1 != 1 {
+      tt.Errorf("parent worker running: %v", r1)
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    select {
+    case <-parent:
+      tt.Logf("parent job done")
+    case <-time.After(10 * time.Millisecond):
+      tt.Errorf("parent job still run")
+    }
+
+    time.Sleep(10 * time.Millisecond)
+
+    r2 := e.Running()
+    if r2 != 0 {
+      tt.Errorf("all jobs done: %v", r2)
+    }
+  })
+}
