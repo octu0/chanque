@@ -239,6 +239,10 @@ func(*Executor) Release()
 func(*Executor) ReleaseAndWait()
 func(*Executor) Running() int32
 func(*Executor) Workers() int32
+func(*Executor) SubExecutor() *SubExecutor
+
+func(*SubExecutor) Submit(Job)
+func(*SubExecutor) Wait()
 ```
 
 ### type `Worker`
