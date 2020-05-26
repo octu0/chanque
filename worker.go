@@ -54,7 +54,7 @@ func WorkerPostHook(hook WorkerHook) WorkerOptionFunc {
   }
 }
 
-// cople check
+// compile check
 var(
   _ Worker = (*defaultWorker)(nil)
 )
@@ -170,7 +170,7 @@ func (w *defaultWorker) runloop() {
   }
 }
 
-// cople check
+// compile check
 var(
   _ Worker = (*bufferWorker)(nil)
 )
