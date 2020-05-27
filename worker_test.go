@@ -9,7 +9,7 @@ import(
 )
 
 func TestWorkerSequence(t *testing.T) {
-  t.Run("default", func(tt *testing.T) {
+  checkSeq := func(tt *testing.T, f func(h WorkerHandler) Worker){
     rand.Seed(time.Now().UnixNano())
 
     c := make([]int, 0)
@@ -23,7 +23,7 @@ func TestWorkerSequence(t *testing.T) {
 
       time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
     }
-    w := NewDefaultWorker(h)
+    w := f(h)
     for i := 0; i < s; i += 1 {
       w.Enqueue(i)
     }
@@ -38,36 +38,32 @@ func TestWorkerSequence(t *testing.T) {
         tt.Errorf("not sequencial c[%d] != %d", i, c[i])
       }
     }
+  }
+  t.Run("default/default", func(tt *testing.T) {
+    checkSeq(tt, func(h WorkerHandler) Worker {
+      return NewDefaultWorker(h)
+    })
   })
-  t.Run("buffer", func(tt *testing.T) {
-    rand.Seed(time.Now().UnixNano())
+  t.Run("buffer/default", func(tt *testing.T) {
+    checkSeq(tt, func(h WorkerHandler) Worker {
+      return NewBufferWorker(h)
+    })
+  })
+  t.Run("default/executor10/10", func(tt *testing.T) {
+    e := NewExecutor(10, 10)
+    defer e.Release()
 
-    c := make([]int, 0)
-    s := 30
-    m := new(sync.Mutex)
-    h := func(p interface{}) {
-      m.Lock()
-      defer m.Unlock()
+    checkSeq(tt, func(h WorkerHandler) Worker {
+      return NewDefaultWorker(h, WorkerExecutor(e))
+    })
+  })
+  t.Run("buffer/executor10/10", func(tt *testing.T) {
+    e := NewExecutor(10, 10)
+    defer e.Release()
 
-      c = append(c, p.(int))
-
-      time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
-    }
-    w := NewBufferWorker(h, WorkerPanicHandler(noopPanicHandler))
-    for i := 0; i < s; i += 1 {
-      w.Enqueue(i)
-    }
-    w.ShutdownAndWait()
-
-    tt.Logf("v = %v", c)
-    if len(c) != s {
-      tt.Errorf("c should be len = %d", s)
-    }
-    for i := 0; i < s; i += 1 {
-      if c[i] != i {
-        tt.Errorf("not sequencial c[%d] != %d", i, c[i])
-      }
-    }
+    checkSeq(tt, func(h WorkerHandler) Worker {
+      return NewBufferWorker(h, WorkerExecutor(e))
+    })
   })
 }
 

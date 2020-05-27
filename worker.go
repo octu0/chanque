@@ -287,6 +287,7 @@ func (w *bufferWorker) runloop() {
       w.exec(q, done)
     }
   }
+  running := int32(0)
 
   buffer := make([]interface{}, 0)
   for {
@@ -299,10 +300,17 @@ func (w *bufferWorker) runloop() {
         continue
       }
 
+      if atomic.CompareAndSwapInt32(&running, 0, 1) != true {
+        continue
+      }
+
       queue := make([]interface{}, len(buffer))
       copy(queue, buffer)
       buffer = buffer[len(buffer):]
-      w.subexec.Submit(genExec(queue, check))
+      w.subexec.Submit(genExec(queue, func(){
+        atomic.StoreInt32(&running, 0)
+        check()
+      }))
 
     case param, ok :=<-w.queue.Chan():
       if ok != true {
