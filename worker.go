@@ -2,9 +2,9 @@ package chanque
 
 import(
   "context"
-  "sync"
   "sync/atomic"
 )
+
 type Worker interface {
   Enqueue(interface{}) bool
   CloseEnqueue()       bool
@@ -28,6 +28,7 @@ type WorkerOption struct {
   panicHandler  PanicHandler
   preHook       WorkerHook
   postHook      WorkerHook
+  executor      *Executor
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -54,6 +55,12 @@ func WorkerPostHook(hook WorkerHook) WorkerOptionFunc {
   }
 }
 
+func WorkerExecutor(executor *Executor) WorkerOptionFunc {
+  return func(opt *WorkerOption) {
+    opt.executor = executor
+  }
+}
+
 // compile check
 var(
   _ Worker = (*defaultWorker)(nil)
@@ -67,14 +74,13 @@ const(
 type defaultWorker struct {
   queue        *Queue
   handler      WorkerHandler
-  executor     *Executor
   closed       int32
-  wg           *sync.WaitGroup
   ctx          context.Context
   cancel       context.CancelFunc
   panicHandler PanicHandler
   preHook      WorkerHook
   postHook     WorkerHook
+  subexec      *SubExecutor
 }
 
 // run background
@@ -95,27 +101,28 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *default
   if opt.postHook == nil {
     opt.postHook = noopWorkerHook
   }
+  if opt.executor == nil {
+    opt.executor = NewExecutor(1, 1)
+  }
 
   ctx, cancel   := context.WithCancel(opt.ctx)
   w             := new(defaultWorker)
   w.queue        = NewQueue(0, QueuePanicHandler(opt.panicHandler))
   w.handler      = handler
-  w.executor     = NewExecutor(1, 1)
   w.closed       = workerEnqueueInit
-  w.wg           = new(sync.WaitGroup)
   w.ctx          = ctx
   w.cancel       = cancel
   w.panicHandler = opt.panicHandler
   w.preHook      = opt.preHook
   w.postHook     = opt.postHook
+  w.subexec      = opt.executor.SubExecutor()
 
   w.initWorker()
   return w
 }
 
 func (w *defaultWorker) initWorker() {
-  w.wg.Add(1)
-  w.executor.Submit(w.runloop)
+  w.subexec.Submit(w.runloop)
 }
 
 func (w *defaultWorker) ForceStop() {
@@ -125,13 +132,11 @@ func (w *defaultWorker) ForceStop() {
 // release channels and executor goroutine
 func (w *defaultWorker) Shutdown() {
   w.CloseEnqueue()
-  w.executor.Release()
 }
 
 func (w *defaultWorker) ShutdownAndWait() {
   w.CloseEnqueue()
-  w.wg.Wait()
-  w.executor.ReleaseAndWait()
+  w.subexec.Wait()
 }
 
 func (w *defaultWorker) CloseEnqueue() bool {
@@ -152,7 +157,6 @@ func (w *defaultWorker) Enqueue(param interface{}) bool {
 }
 
 func (w *defaultWorker) runloop() {
-  defer w.wg.Done()
   for {
     select {
     case <-w.ctx.Done():
@@ -201,19 +205,21 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWo
   if opt.postHook == nil {
     opt.postHook = noopWorkerHook
   }
+  if opt.executor == nil {
+    opt.executor = NewExecutor(2, 2) // checker + dequeue
+  }
 
   ctx, cancel   := context.WithCancel(opt.ctx)
   w             := new(bufferWorker)
   w.queue        = NewQueue(0, QueuePanicHandler(opt.panicHandler))
   w.handler      = handler
-  w.executor     = NewExecutor(2, 2) // checker + dequeue
   w.closed       = workerEnqueueInit
-  w.wg           = new(sync.WaitGroup)
   w.ctx          = ctx
   w.cancel       = cancel
   w.panicHandler = opt.panicHandler
   w.preHook      = opt.preHook
   w.postHook     = opt.postHook
+  w.subexec      = opt.executor.SubExecutor()
   w.chkqueue     = NewQueue(1, QueuePanicHandler(noopPanicHandler))
 
   w.initWorker()
@@ -222,8 +228,7 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWo
 
 // run background
 func (w *bufferWorker) initWorker() {
-  w.wg.Add(1)
-  w.executor.Submit(w.runloop)
+  w.subexec.Submit(w.runloop)
 }
 
 func (w *bufferWorker) ForceStop() {
@@ -233,13 +238,11 @@ func (w *bufferWorker) ForceStop() {
 // release channels and executor goroutine
 func (w *bufferWorker) Shutdown() {
   w.CloseEnqueue()
-  w.executor.Release()
 }
 
 func (w *bufferWorker) ShutdownAndWait() {
   w.CloseEnqueue()
-  w.wg.Wait()
-  w.executor.ReleaseAndWait()
+  w.subexec.Wait()
 }
 
 func (w *bufferWorker) CloseEnqueue() bool {
@@ -271,7 +274,6 @@ func (w *bufferWorker) exec(parameters []interface{}, done func()) {
 }
 
 func (w *bufferWorker) runloop() {
-  defer w.wg.Done()
   defer w.chkqueue.Close()
 
   check := func(c *Queue) Job {
@@ -300,18 +302,18 @@ func (w *bufferWorker) runloop() {
       queue := make([]interface{}, len(buffer))
       copy(queue, buffer)
       buffer = buffer[len(buffer):]
-      w.executor.Submit(genExec(queue, check))
+      w.subexec.Submit(genExec(queue, check))
 
     case param, ok :=<-w.queue.Chan():
       if ok != true {
         if 0 < len(buffer) {
-          w.executor.Submit(genExec(buffer, bufferExecNoopDone))
+          w.subexec.Submit(genExec(buffer, bufferExecNoopDone))
         }
         return
       }
 
       buffer = append(buffer, param)
-      w.executor.Submit(check)
+      w.subexec.Submit(check)
     }
   }
 }

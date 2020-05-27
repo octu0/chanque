@@ -214,3 +214,90 @@ func TestBufferWorkerShutdownAndWait(t *testing.T) {
     w.ShutdownAndWait()
   })
 }
+
+func TestWorkerOptionExecutor(t *testing.T) {
+  t.Run("default", func(tt *testing.T) {
+    e := NewExecutor(10, 10)
+    defer e.Release()
+
+    done := make(chan struct{})
+    e.Submit(func(){
+      // my task
+      <-done
+    })
+    time.Sleep(1 * time.Millisecond)
+
+    r1 := e.Running()
+    if r1 != 1 {
+      tt.Errorf("running my task 1 != %d", r1)
+    }
+
+    w := NewDefaultWorker(func(interface{}){}, WorkerExecutor(e))
+    w.Enqueue(1)
+    w.Enqueue(2)
+    w.Enqueue(3)
+
+    r2 := e.Running()
+    if r2  < 2 {
+      tt.Errorf("worker + my task running: %d", r2)
+    }
+
+    w.ShutdownAndWait()
+
+    r3 := e.Running()
+    if r3 != 1 {
+      tt.Errorf("running my task 1 != %d", r1)
+    }
+
+    done <-struct{}{}
+
+    time.Sleep(1 * time.Millisecond)
+
+    r4 := e.Running()
+    if r4 != 0 {
+      tt.Errorf("all task done %d", r1)
+    }
+  })
+  t.Run("buffer", func(tt *testing.T) {
+    e := NewExecutor(10, 10)
+    defer e.Release()
+
+    done := make(chan struct{})
+    e.Submit(func(){
+      // my task
+      <-done
+    })
+    time.Sleep(1 * time.Millisecond)
+
+    r1 := e.Running()
+    if r1 != 1 {
+      tt.Errorf("running my task 1 != %d", r1)
+    }
+
+    w := NewBufferWorker(func(interface{}){}, WorkerExecutor(e))
+    w.Enqueue(1)
+    w.Enqueue(2)
+    w.Enqueue(3)
+
+    r2 := e.Running()
+    if r2  < 2 {
+      tt.Errorf("worker + my task running: %d", r2)
+    }
+
+    w.ShutdownAndWait()
+
+    r3 := e.Running()
+    if r3 != 1 {
+      tt.Errorf("running my task 1 != %d", r1)
+    }
+
+    done <-struct{}{}
+
+    time.Sleep(1 * time.Millisecond)
+
+    r4 := e.Running()
+    if r4 != 0 {
+      tt.Errorf("all task done %d", r1)
+    }
+  })
+}
