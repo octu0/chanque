@@ -84,7 +84,7 @@ type defaultWorker struct {
 }
 
 // run background
-func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *defaultWorker {
+func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
   opt := new(WorkerOption)
   for _, fn := range funcs {
     fn(opt)
@@ -188,7 +188,7 @@ type bufferWorker struct {
   chkqueue  *Queue
 }
 
-func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) *bufferWorker {
+func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
   opt := new(WorkerOption)
   for _, fn := range funcs {
     fn(opt)

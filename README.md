@@ -209,6 +209,56 @@ func main(){
 }
 ```
 
+### Context / ContextTimeout
+
+Context/ContextTimeout provides a method for the waiting process  
+Both apply and use a function that will be called when all operations are complete  
+
+```go
+import(
+  "fmt"
+  "github.com/octu0/chanque"
+)
+
+func main(){
+  e := NewExecutor(1, 10)
+  defer e.Relase()
+
+  heavyProcessA := func(done chanque.DoneFunc) {
+    defer done()
+    time.Sleep(1 * time.Second) // heavy process
+  }
+  heavyProcessB := func(done chanque.DoneFunc) {
+    defer done()
+    time.Sleep(5 * time.Second) // heavy process
+  }
+
+  ctx := chanque.NewContext(e, func(){
+    fmt.Printf("all done")
+  })
+  go func(d chanque.DoneFunc) {
+    heavyProcessA(d)
+  }(ctx.Add())
+  go func(d chanque.DoneFunc) {
+    heavyProcessB(d)
+  }(ctx.Add())
+  ctx.Wait()
+
+  // ContextTimeout is used to execute 
+  // a process without waiting for each operation to complete.
+  ctxTO := chanque.NewContextTimeout(e, func(){
+    fmt.Printf("all done w/o sub process done")
+  }, 1 * time.Second)
+  go func(d chanque.DoneFunc) {
+    heavyProcessA(d)
+  }(ctxTO.Add())
+  go func(d chanque.DoneFunc) {
+    heavyProcessB(d)
+  }(ctxTO.Add())
+  ctxTO.Background()
+}
+```
+
 ## Functions
 
 ### type `Queue`
@@ -268,6 +318,21 @@ func(*Pipeline) Enqueue(parameter interface{}) bool
 func(*Pipeline) CloseEnqueue() bool
 func(*Pipeline) Shutdown()
 func(*Pipeline) ShutdownAndWait()
+```
+
+### type `Context` / `ContextTimeout`
+
+```
+NewContext(e *Executor, fn DoneFunc) *Context
+NewContextTimeout(e *Executor, fn DoneFunc, timeout time.Duration) *ContextTimeout
+
+func(*Context) Add() (cancel DoneFunc)
+func(*Context) Wait()
+func(*Context) Background()
+
+func(*ContextTimeout) Add() (cancel DoneFunc)
+func(*ContextTimeout) Wait()
+func(*ContextTimeout) Background()
 ```
 
 ## License

@@ -37,6 +37,14 @@ func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
   return q
 }
 
+func (q *Queue) Len() int {
+  return len(q.ch)
+}
+
+func (q *Queue) Cap() int {
+  return cap(q.ch)
+}
+
 func (q *Queue) Chan() <-chan interface{} {
   return q.ch
 }
