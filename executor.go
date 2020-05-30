@@ -9,9 +9,9 @@ import(
 
 type Job func()
 
-type ExecutorOptionFunc func(*ExecutorOption)
+type ExecutorOptionFunc func(*optExecutor)
 
-type ExecutorOption struct {
+type optExecutor struct {
   ctx             context.Context
   panicHandler    PanicHandler
   reducerInterval time.Duration
@@ -19,22 +19,22 @@ type ExecutorOption struct {
 }
 
 func ExecutorPanicHandler(handler PanicHandler) ExecutorOptionFunc {
-  return func(opt *ExecutorOption) {
+  return func(opt *optExecutor) {
     opt.panicHandler = handler
   }
 }
 func ExecutorReducderInterval(interval time.Duration) ExecutorOptionFunc {
-  return func(opt *ExecutorOption) {
+  return func(opt *optExecutor) {
     opt.reducerInterval = interval
   }
 }
 func ExecutorMaxCapacity(capacity int) ExecutorOptionFunc {
-  return func(opt *ExecutorOption) {
+  return func(opt *optExecutor) {
     opt.maxCapacity = capacity
   }
 }
 func ExecutorContext(ctx context.Context) ExecutorOptionFunc {
-  return func(opt *ExecutorOption) {
+  return func(opt *optExecutor) {
     opt.ctx = ctx
   }
 }
@@ -59,7 +59,7 @@ type Executor struct {
 }
 
 func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executor {
-  opt := new(ExecutorOption)
+  opt := new(optExecutor)
   for _, fn := range funcs {
     fn(opt)
   }
