@@ -129,6 +129,14 @@ func (e *Executor) callPanicHandler(pt PanicType, rcv interface{}) {
   e.panicHandler(pt, rcv)
 }
 
+func (e *Executor) MinWorker() int {
+  return e.minWorker
+}
+
+func (e *Executor) MaxWorker() int {
+  return e.maxWorker
+}
+
 func (e *Executor) increRunning() {
   atomic.AddInt32(&e.runningNum, 1)
 }
@@ -177,6 +185,7 @@ func (e *Executor) startOndemand() {
       }
     }
   }
+  // reuse current worker
   e.decreWorker()
 }
 

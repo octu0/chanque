@@ -9,14 +9,14 @@ func TestExecutorDefault(t *testing.T) {
   chkDefault := func(e *Executor) {
     defer e.Release()
 
-    if e.minWorker != 0 {
+    if e.MinWorker() != 0 {
       t.Errorf("default min 0 actual:%d", e.minWorker)
     }
-    if e.maxWorker != 1 {
+    if e.MaxWorker() != 1 {
       t.Errorf("default max 1 actual:%d", e.maxWorker)
     }
-    if cap(e.jobs.Chan()) != 0 {
-      t.Errorf("default capacity 0 actual:%d", cap(e.jobs.Chan()))
+    if e.jobs.Cap() != 0 {
+      t.Errorf("default capacity 0 actual:%d", e.jobs.Cap())
     }
     if e.reducerInterval != defaultReducerInterval {
       t.Errorf("default 10s actual:%s", e.reducerInterval)
@@ -33,14 +33,14 @@ func TestExecutorDefault(t *testing.T) {
     e := NewExecutor(100, 50)
     defer e.Release()
 
-    if e.minWorker != 100 {
+    if e.MinWorker() != 100 {
       tt.Errorf("init 100: %d", e.minWorker)
     }
-    if e.maxWorker != 100 {
+    if e.MaxWorker() != 100 {
       tt.Errorf("init max < min then max eq min: %d", e.maxWorker)
     }
-    if cap(e.jobs.Chan()) != 0 {
-      tt.Errorf("init maxCapacity default 0: %d", cap(e.jobs.Chan()))
+    if e.jobs.Cap() != 0 {
+      tt.Errorf("init maxCapacity default 0: %d", e.jobs.Cap())
     }
   })
 
@@ -48,14 +48,14 @@ func TestExecutorDefault(t *testing.T) {
     e := NewExecutor(50, 150)
     defer e.Release()
 
-    if e.minWorker != 50 {
+    if e.MinWorker() != 50 {
       tt.Errorf("init 50: %d", e.minWorker)
     }
-    if e.maxWorker != 150 {
+    if e.MaxWorker() != 150 {
       tt.Errorf("init specified max: %d", e.maxWorker)
     }
-    if cap(e.jobs.Chan()) != 0 {
-      tt.Errorf("init maxCapacity default 0: %d", cap(e.jobs.Chan()))
+    if e.jobs.Cap() != 0 {
+      tt.Errorf("init maxCapacity default 0: %d", e.jobs.Cap())
     }
   })
 }
@@ -67,14 +67,14 @@ func TestExecutorOption(t *testing.T) {
     )
     defer e.Release()
 
-    if e.minWorker != 1 {
+    if e.MinWorker() != 1 {
       tt.Errorf("init 1: %d", e.minWorker)
     }
-    if e.maxWorker != 5 {
+    if e.MaxWorker() != 5 {
       tt.Errorf("init specified max: %d", e.maxWorker)
     }
-    if cap(e.jobs.Chan()) != 2 {
-      tt.Errorf("init specified capacity: %d", cap(e.jobs.Chan()))
+    if e.jobs.Cap() != 2 {
+      tt.Errorf("init specified capacity: %d", e.jobs.Cap())
     }
   })
 
@@ -84,14 +84,14 @@ func TestExecutorOption(t *testing.T) {
     )
     defer e.Release()
 
-    if e.minWorker != 1 {
+    if e.MinWorker() != 1 {
       tt.Errorf("init 1: %d", e.minWorker)
     }
-    if e.maxWorker != 5 {
+    if e.MaxWorker() != 5 {
       tt.Errorf("init specified max: %d", e.maxWorker)
     }
-    if cap(e.jobs.Chan()) != 0 {
-      tt.Errorf("init specified capacity: %d", cap(e.jobs.Chan()))
+    if e.jobs.Cap() != 0 {
+      tt.Errorf("init specified capacity: %d", e.jobs.Cap())
     }
   })
 
@@ -102,8 +102,8 @@ func TestExecutorOption(t *testing.T) {
     )
     defer e.Release()
 
-    if cap(e.jobs.Chan()) != 10 {
-      tt.Errorf("init specified capacity: %d", cap(e.jobs.Chan()))
+    if e.jobs.Cap() != 10 {
+      tt.Errorf("init specified capacity: %d", e.jobs.Cap())
     }
     if e.reducerInterval != (time.Duration(30) * time.Millisecond) {
       tt.Errorf("init specified interval: %s", e.reducerInterval)
