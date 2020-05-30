@@ -21,11 +21,18 @@ type pipeInputResult struct {
 type PipelineOptionFunc func(*PipelineOption)
 type PipelineOption struct {
   panicHandler PanicHandler
+  executor     *Executor
 }
 
 func PipelinePanicHandler(handler PanicHandler) PipelineOptionFunc {
-  return func(p *PipelineOption) {
-    p.panicHandler = handler
+  return func(opt *PipelineOption) {
+    opt.panicHandler = handler
+  }
+}
+
+func PipelineExecutor(executor *Executor) PipelineOptionFunc {
+  return func(opt *PipelineOption) {
+    opt.executor = executor
   }
 }
 
@@ -52,10 +59,22 @@ func NewPipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...P
   p.done       = new(sync.WaitGroup)
   p.inFunc     = inFunc
   p.outFunc    = outFunc
-  p.parameters = NewBufferWorker(p.workerPrepare, WorkerPanicHandler(opt.panicHandler))
-  p.inWorker   = NewBufferWorker(p.workerIn, WorkerPanicHandler(opt.panicHandler))
-  p.outWorker  = NewBufferWorker(p.workerOut, WorkerPanicHandler(opt.panicHandler))
-  p.doneWorker = NewBufferWorker(p.workerDone, WorkerPanicHandler(opt.panicHandler))
+  p.parameters = NewBufferWorker(p.workerPrepare,
+    WorkerPanicHandler(opt.panicHandler),
+    WorkerExecutor(opt.executor),
+  )
+  p.inWorker   = NewBufferWorker(p.workerIn,
+    WorkerPanicHandler(opt.panicHandler),
+    WorkerExecutor(opt.executor),
+  )
+  p.outWorker  = NewBufferWorker(p.workerOut,
+    WorkerPanicHandler(opt.panicHandler),
+    WorkerExecutor(opt.executor),
+  )
+  p.doneWorker = NewBufferWorker(p.workerDone,
+    WorkerPanicHandler(opt.panicHandler),
+    WorkerExecutor(opt.executor),
+  )
 
   return p
 }
