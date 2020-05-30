@@ -21,9 +21,9 @@ func noopWorkerHook() {
   /* noop */
 }
 
-type WorkerOptionFunc func(*WorkerOption)
+type WorkerOptionFunc func(*optWorker)
 
-type WorkerOption struct {
+type optWorker struct {
   ctx           context.Context
   panicHandler  PanicHandler
   preHook       WorkerHook
@@ -32,31 +32,31 @@ type WorkerOption struct {
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
-  return func(opt *WorkerOption) {
+  return func(opt *optWorker) {
     opt.ctx = ctx
   }
 }
 
 func WorkerPanicHandler(handler PanicHandler) WorkerOptionFunc {
-  return func(opt *WorkerOption) {
+  return func(opt *optWorker) {
     opt.panicHandler = handler
   }
 }
 
 func WorkerPreHook(hook WorkerHook) WorkerOptionFunc {
-  return func(opt *WorkerOption) {
+  return func(opt *optWorker) {
     opt.preHook = hook
   }
 }
 
 func WorkerPostHook(hook WorkerHook) WorkerOptionFunc {
-  return func(opt *WorkerOption) {
+  return func(opt *optWorker) {
     opt.postHook = hook
   }
 }
 
 func WorkerExecutor(executor *Executor) WorkerOptionFunc {
-  return func(opt *WorkerOption) {
+  return func(opt *optWorker) {
     opt.executor = executor
   }
 }
@@ -85,7 +85,7 @@ type defaultWorker struct {
 
 // run background
 func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
-  opt := new(WorkerOption)
+  opt := new(optWorker)
   for _, fn := range funcs {
     fn(opt)
   }
@@ -189,7 +189,7 @@ type bufferWorker struct {
 }
 
 func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
-  opt := new(WorkerOption)
+  opt := new(optWorker)
   for _, fn := range funcs {
     fn(opt)
   }
