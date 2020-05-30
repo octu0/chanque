@@ -18,20 +18,21 @@ type pipeInputResult struct {
   err    error
 }
 
-type PipelineOptionFunc func(*PipelineOption)
-type PipelineOption struct {
+type PipelineOptionFunc func(*optPipeline)
+
+type optPipeline struct {
   panicHandler PanicHandler
   executor     *Executor
 }
 
 func PipelinePanicHandler(handler PanicHandler) PipelineOptionFunc {
-  return func(opt *PipelineOption) {
+  return func(opt *optPipeline) {
     opt.panicHandler = handler
   }
 }
 
 func PipelineExecutor(executor *Executor) PipelineOptionFunc {
-  return func(opt *PipelineOption) {
+  return func(opt *optPipeline) {
     opt.executor = executor
   }
 }
@@ -47,7 +48,7 @@ type Pipeline struct {
 }
 
 func NewPipeline(inFunc PipelineInputFunc, outFunc PipelineOutputFunc, opts ...PipelineOptionFunc) *Pipeline {
-  opt:= new(PipelineOption)
+  opt:= new(optPipeline)
   for _, fn := range opts {
     fn(opt)
   }
