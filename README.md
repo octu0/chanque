@@ -7,10 +7,6 @@
 
 `chanque` provides a simple workload for channel and goroutine.
 
-## Documentation
-
-https://godoc.org/github.com/octu0/chanque
-
 ## Installation
 
 ```
@@ -259,6 +255,90 @@ func main(){
 }
 ```
 
+### Loop
+
+Loop provides safe termination of an infinite loop by goroutine.  
+You can use callbacks with Queue and time.Ticker.  
+See code below
+
+```go
+//
+// old loop
+//
+
+func bar(ctx context.Context, queue chan string, done chan struct{}) {
+  for {
+    select {
+    case <-ctx.Done():
+      return
+
+    case v := <-queue:
+      println("queue=", v)
+
+    case <-done:
+      return
+    }
+  }
+}
+func foo(parent context.Context){
+  ctx, cancel := context.WithTimeout(parent, 1 * time.Second)
+  queue := make(chan string)
+  done  := make(chan struct{})
+  go bar(ctx, queue, done)
+  go func(){
+    queue <-"hello1"
+    queue <-"hello2"
+    time.Sleep(1 * time.Second)
+    queue <-"world" // blocking! == no goroutine reader to done
+  }()
+
+  go func(){
+    time.Sleep(1 * time.Second)
+    done <-struct{}{} // blocking! == no goroutine reader to done
+  }()
+
+  go func(){
+    <-other.chan
+    cancel()
+  }()
+}
+
+//
+// new loop
+//
+func main(){
+  e := NewExecutor(1, 10)
+
+  queue := NewQueue(0)
+  
+  loop := NewLoop(e)
+  loop.SetDequeue(func(val interface{}, ok bool) chanque.LoopNext {
+    if ok != true {
+      // queue closed
+      return chanque.LoopNextBreak
+    }
+    println("queue=", val.(string))
+  }, queue)
+
+  loop.ExecuteTimeout(1 * time.Second)
+
+  go func(){
+    queue.Enqueue("hello1")
+    queue.Enqueue("hello2")
+    time.Sleep(1 * time.Second)
+    queue.EnqueueNB("world")
+  }()
+  go func(){
+    time.Sleep(1 * time.Second)
+    loop.Stop() // done for loop
+  }()
+}
+```
+
+## Documentation
+
+https://godoc.org/github.com/octu0/chanque
+
 ## Functions
 
 ### type `Queue`
@@ -282,7 +362,7 @@ func(*Queue) Close() (closed bool)
 ```
 type Job func()
 
-CreateExecutor(minWorker, maxWorker int, fn ...ExecutorOptionFunc) *Executor
+NewExecutor(minWorker, maxWorker int, fn ...ExecutorOptionFunc) *Executor
 
 func(*Executor) Submit(Job)
 func(*Executor) Release()
@@ -312,7 +392,10 @@ func(Worker) ShutdownAndWait()
 ### type `Pipeline`
 
 ```
-CreatePipeline(PipelineInputFunc, PipelineOutputFunc, fn ...PipelineOptionFunc) *Pipeline
+NewPipeline(PipelineInputFunc, PipelineOutputFunc, fn ...PipelineOptionFunc) *Pipeline
+
+type PipelineInputFunc  func(parameter interface{}) (result interface{}, err error)
+type PipelineOutputFunc func(result interface{}, err error)
 
 func(*Pipeline) Enqueue(parameter interface{}) bool
 func(*Pipeline) CloseEnqueue() bool
@@ -333,6 +416,29 @@ func(*Context) Background()
 func(*ContextTimeout) Add() (cancel DoneFunc)
 func(*ContextTimeout) Wait()
 func(*ContextTimeout) Background()
+```
+
+### type `Loop`
+
+```
+NewLoop(e *Executor, fn ...LoopOptionFunc) *Loop
+
+const(
+  LoopNextContinue LoopNext = 1
+  LoopNextBreak    LoopNext = 2
+)
+
+type LoopDefaultHandler  func() LoopNext
+type LoopDequeueHandler  func(val interface{}, ok bool) LoopNext
+type LoopTickerHandler   func() LoopNext
+
+func(*Loop) SetDefeult(LoopDefaultHandler) // select { case ...; default: }
+func(*Loop) SetTicker(LoopTickerHandler, time.Duration) // select { case <-tick.C: }
+func(*Loop) SetDequeue(LoopDequeueHandler, *Queue)  // select { case val, ok <-queue: }
+func(*Loop) Execute()
+func(*Loop) ExecuteTimeout(time.Duration)
+func(*Loop) Stop()
+func(*Loop) StopAndWait()
 ```
 
 ## License
