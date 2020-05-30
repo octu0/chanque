@@ -232,12 +232,15 @@ func main(){
   ctx := chanque.NewContext(e, func(){
     fmt.Printf("all done")
   })
+
   go func(d chanque.DoneFunc) {
     heavyProcessA(d)
   }(ctx.Add())
+
   go func(d chanque.DoneFunc) {
     heavyProcessB(d)
   }(ctx.Add())
+
   ctx.Wait()
 
   // ContextTimeout is used to execute 
@@ -245,12 +248,15 @@ func main(){
   ctxTO := chanque.NewContextTimeout(e, func(){
     fmt.Printf("all done w/o sub process done")
   }, 1 * time.Second)
+
   go func(d chanque.DoneFunc) {
     heavyProcessA(d)
   }(ctxTO.Add())
+
   go func(d chanque.DoneFunc) {
     heavyProcessB(d)
   }(ctxTO.Add())
+
   ctxTO.Background()
 }
 ```
@@ -259,13 +265,11 @@ func main(){
 
 Loop provides safe termination of an infinite loop by goroutine.  
 You can use callbacks with Queue and time.Ticker.  
-See code below
 
 ```go
 //
 // old loop
 //
-
 func bar(ctx context.Context, queue chan string, done chan struct{}) {
   for {
     select {
@@ -289,7 +293,7 @@ func foo(parent context.Context){
     queue <-"hello1"
     queue <-"hello2"
     time.Sleep(1 * time.Second)
-    queue <-"world" // blocking! == no goroutine reader to done
+    queue <-"world" // blocking! == no goroutine reader to queue
   }()
 
   go func(){
