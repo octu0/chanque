@@ -568,6 +568,7 @@ func TestExecutorWorkerShrink(t *testing.T) {
       }),
     )
     defer e.Release()
+    time.Sleep(10 * time.Millisecond) // todo worker startup WaitGroup
 
     r1 := e.Running()
     w1 := e.Workers()
@@ -580,10 +581,10 @@ func TestExecutorWorkerShrink(t *testing.T) {
     }
     for i := 0; i < 30; i += 1 {
       e.Submit(func(){
-        time.Sleep(10 * time.Millisecond)
+        time.Sleep(30 * time.Millisecond)
       })
     }
-    time.Sleep(5 * time.Millisecond) // waiting submitted
+    time.Sleep(10 * time.Millisecond) // waiting submitted todo: SubmitAndWait
 
     r2 := e.Running()
     w2 := e.Workers()
