@@ -322,6 +322,7 @@ func main(){
       return chanque.LoopNextBreak
     }
     println("queue=", val.(string))
+    return chanque.LoopNextContinue
   }, queue)
 
   loop.ExecuteTimeout(1 * time.Second)
@@ -330,7 +331,7 @@ func main(){
     queue.Enqueue("hello1")
     queue.Enqueue("hello2")
     time.Sleep(1 * time.Second)
-    queue.EnqueueNB("world")
+    queue.EnqueueNB("world") // Enqueue / EnqueueNB / EnqueueRetry
   }()
   go func(){
     time.Sleep(1 * time.Second)
