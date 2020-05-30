@@ -3,7 +3,90 @@ package chanque
 import(
   "testing"
   "time"
+  "sync"
 )
+
+func TestQueueLenCap(t *testing.T) {
+  t.Run("cap0", func(tt *testing.T) {
+    q := NewQueue(0)
+    if q.Len() != 0 {
+      tt.Errorf("no enqueue")
+    }
+    if q.Cap() != 0 {
+      tt.Errorf("initial cap is 0")
+    }
+  })
+  t.Run("cap10", func(tt *testing.T) {
+    q := NewQueue(10)
+    if q.Len() != 0 {
+      tt.Errorf("no enqueue")
+    }
+    if q.Cap() != 10 {
+      tt.Errorf("initial cap is 10")
+    }
+  })
+  t.Run("cap0len", func(tt *testing.T) {
+    q := NewQueue(0)
+    latch := make(chan struct{})
+    go func(){
+      <-latch
+      // requires reader
+      v, _ := q.Dequeue()
+      tt.Logf(v.(string))
+    }()
+
+    latch <-struct{}{}
+    if q.Len() != 0 {
+      tt.Errorf("no enqueue")
+    }
+
+    latch2 := make(chan struct{})
+    go func() {
+      <-latch2
+      q.Enqueue("hello world")
+    }()
+
+    latch2 <-struct{}{}
+    if q.Len() != 0 {
+      tt.Errorf("cap0 len always 0")
+    }
+  })
+  t.Run("cap10len", func(tt *testing.T) {
+    q := NewQueue(10)
+    if q.Len() != 0 {
+      tt.Errorf("no enqueue")
+    }
+    if q.Cap() != 10 {
+      tt.Errorf("capacity 10")
+    }
+
+    for i := 0; i < 5; i += 1{
+      q.Enqueue("1")
+    }
+
+    if q.Len() != 5 {
+      tt.Errorf("enqueue 5 times")
+    }
+    if q.Cap() != 10 {
+      tt.Errorf("capacity 10")
+    }
+    wg := new(sync.WaitGroup)
+    for i := 0; i < 3; i += 1 {
+      wg.Add(1)
+      go func(w *sync.WaitGroup){
+        q.Dequeue()
+        w.Done()
+      }(wg)
+    }
+    wg.Wait()
+    if q.Len() != 2 {
+      tt.Errorf("dequeue 3 times")
+    }
+    if q.Cap() != 10 {
+      tt.Errorf("capacity 10")
+    }
+  })
+}
 
 func TestBlockingEnqueue(t *testing.T) {
   t.Run("blocking", func(tt *testing.T) {
