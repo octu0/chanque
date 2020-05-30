@@ -4,14 +4,14 @@ import(
   "time"
 )
 
-type QueueOptionFunc func(*QueueOption)
+type QueueOptionFunc func(*optQueue)
 
-type QueueOption struct {
+type optQueue struct {
   panicHandler  PanicHandler
 }
 
 func QueuePanicHandler(handler PanicHandler) QueueOptionFunc {
-  return func(opt *QueueOption) {
+  return func(opt *optQueue) {
     opt.panicHandler = handler
   }
 }
@@ -22,7 +22,7 @@ type Queue struct {
 }
 
 func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
-  opt := new(QueueOption)
+  opt := new(optQueue)
   for _, fn := range funcs {
     fn(opt)
   }
