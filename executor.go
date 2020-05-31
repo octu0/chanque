@@ -44,7 +44,7 @@ var(
 )
 
 type Executor struct {
-  mutex           *sync.RWMutex
+  mutex           *sync.Mutex
   wg              *sync.WaitGroup
   jobs            *Queue
   ctx             context.Context
@@ -88,7 +88,7 @@ func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executo
   }
 
   e                := new(Executor)
-  e.mutex           = new(sync.RWMutex)
+  e.mutex           = new(sync.Mutex)
   e.wg              = new(sync.WaitGroup)
   e.jobs            = NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler))
   e.ctx             = opt.ctx
