@@ -103,6 +103,10 @@ func main(){
       }
     }(i))
   }
+
+  // On-demand tune min/max worker size
+  exec.TuneMaxWorker(10)
+  exec.TuneMinWorker(5)
 }
 ```
 
@@ -375,6 +379,10 @@ func(*Executor) ReleaseAndWait()
 func(*Executor) Running() int32
 func(*Executor) Workers() int32
 func(*Executor) SubExecutor() *SubExecutor
+func(*Executor) MinWorker() int
+func(*Executor) MaxWorker() int
+func(*Executor) TuneMinWorker(nextMinWorker int)
+func(*Executor) TuneMaxWorker(nextMaxWorker int)
 
 func(*SubExecutor) Submit(Job)
 func(*SubExecutor) Wait()
