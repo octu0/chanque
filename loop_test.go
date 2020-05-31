@@ -178,7 +178,7 @@ func TestLoopExecute(t *testing.T) {
     if c1 != 10 {
       tt.Errorf("run default end: %d", c1)
     }
-    if c2 == 0 || c2 < 8 {
+    if c2 == 0 || c2 < 7 {
       tt.Errorf("run ticker end: %d", c2)
     }
 
