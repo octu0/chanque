@@ -44,7 +44,7 @@ var(
 )
 
 type Executor struct {
-  mutex           *sync.Mutex
+  mutex           *sync.RWMutex
   wg              *sync.WaitGroup
   jobs            *Queue
   ctx             context.Context
@@ -88,7 +88,7 @@ func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executo
   }
 
   e                := new(Executor)
-  e.mutex           = new(sync.Mutex)
+  e.mutex           = new(sync.RWMutex)
   e.wg              = new(sync.WaitGroup)
   e.jobs            = NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler))
   e.ctx             = opt.ctx
@@ -109,7 +109,21 @@ func (e *Executor) initWorker() {
   e.mutex.Lock()
   defer e.mutex.Unlock()
 
-  for i := 0; i < e.minWorker; i += 1 {
+  e.goExecLoop(e.minWorker)
+
+  hctx, hcancel := context.WithCancel(e.ctx)
+  e.healthCancel = hcancel
+
+  e.wg.Add(1)
+  go e.healthloop(hctx, e.jobs)
+}
+
+func (e *Executor) goExecLoop(num int) {
+  if num < 1 {
+    return
+  }
+
+  for i := 0; i < num; i += 1 {
     e.increWorker()
     jctx, jcancel := context.WithCancel(e.ctx)
     e.jobCancel = append(e.jobCancel, jcancel)
@@ -117,12 +131,6 @@ func (e *Executor) initWorker() {
     e.wg.Add(1)
     go e.execloop(jctx, e.jobs)
   }
-
-  hctx, hcancel := context.WithCancel(e.ctx)
-  e.healthCancel = hcancel
-
-  e.wg.Add(1)
-  go e.healthloop(hctx, e.jobs)
 }
 
 func (e *Executor) callPanicHandler(pt PanicType, rcv interface{}) {
@@ -135,6 +143,42 @@ func (e *Executor) MinWorker() int {
 
 func (e *Executor) MaxWorker() int {
   return e.maxWorker
+}
+
+func (e *Executor) TuneMinWorker(nextMinWorker int) {
+  e.mutex.Lock()
+  defer e.mutex.Unlock()
+
+  if nextMinWorker < 1 {
+    nextMinWorker = 1
+  }
+  if e.maxWorker < nextMinWorker {
+    nextMinWorker = e.maxWorker
+  }
+
+  if e.minWorker < nextMinWorker {
+    currentWorkers := int(e.Workers())
+    if currentWorkers < nextMinWorker {
+      diff := nextMinWorker - currentWorkers
+      e.goExecLoop(diff)
+    }
+  }
+
+  e.minWorker = nextMinWorker
+}
+
+func (e *Executor) TuneMaxWorker(nextMaxWorker int) {
+  e.mutex.Lock()
+  defer e.mutex.Unlock()
+
+  if nextMaxWorker < 1 {
+    nextMaxWorker = 1
+  }
+  if nextMaxWorker < e.minWorker {
+    nextMaxWorker = e.minWorker
+  }
+
+  e.maxWorker = nextMaxWorker
 }
 
 func (e *Executor) increRunning() {
@@ -164,29 +208,23 @@ func (e *Executor) Workers() int32 {
 }
 
 func (e *Executor) startOndemand() {
+  e.mutex.Lock()
+  defer e.mutex.Unlock()
+
   running := int(e.Running())
   if running < e.minWorker {
     return
   }
 
-  next := int(e.increWorker())
+  next := int(e.Workers()) + 1
   if running < next {
     if e.minWorker < next {
       if next <= e.maxWorker {
-        e.mutex.Lock()
-        defer e.mutex.Unlock()
-
-        e.wg.Add(1)
-        jctx, jcancel := context.WithCancel(e.ctx)
-        e.jobCancel = append(e.jobCancel, jcancel)
-
-        go e.execloop(jctx, e.jobs)
+        e.goExecLoop(1)
         return
       }
     }
   }
-  // reuse current worker
-  e.decreWorker()
 }
 
 // enqueue job

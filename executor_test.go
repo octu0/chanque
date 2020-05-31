@@ -216,7 +216,7 @@ func TestExecutorOndemandStart(t *testing.T) {
     t.Errorf("no task submmit")
   }
   if w1 != 0 {
-    t.Errorf("minimun zero worker")
+    t.Errorf("minimum zero worker")
   }
 
   latch := make(chan struct{})
@@ -292,7 +292,7 @@ func TestExecutorOndemandStartUpto100(t *testing.T) {
     t.Errorf("no task submmit")
   }
   if w1 != 0 {
-    t.Errorf("minimun zero worker")
+    t.Errorf("minimum zero worker")
   }
 
   enqueued := make(chan struct{})
@@ -758,6 +758,147 @@ func TestSubExecutor(t *testing.T) {
     r2 := e.Running()
     if r2 != 0 {
       tt.Errorf("all jobs done: %v", r2)
+    }
+  })
+}
+
+func TestExecutorTune(t *testing.T) {
+  minimum := func(tt *testing.T, min, max int) {
+    e := NewExecutor(1,1)
+    defer e.Release()
+
+    if e.MinWorker() != 1 {
+      tt.Errorf("minWorker initial 1 != %d", e.MinWorker())
+    }
+    if e.MaxWorker() != 1 {
+      tt.Errorf("maxWorker initial 1 != %d", e.MaxWorker())
+    }
+    if e.Workers() != 1 {
+      tt.Errorf("initial run 1 != %d", e.Workers())
+    }
+
+    e.TuneMinWorker(min)
+
+    if e.MinWorker() != 1 {
+      tt.Errorf("minWorker initial 1 != %d", e.MinWorker())
+    }
+    if e.MaxWorker() != 1 {
+      tt.Errorf("maxWorker initial 1 != %d", e.MaxWorker())
+    }
+    if e.Workers() != 1 {
+      tt.Errorf("initial run 1 != %d", e.Workers())
+    }
+
+    e.TuneMaxWorker(max)
+
+    if e.MinWorker() != 1 {
+      tt.Errorf("minWorker initial 1 != %d", e.MinWorker())
+    }
+    if e.MaxWorker() != 1 {
+      tt.Errorf("maxWorker initial 1 != %d", e.MaxWorker())
+    }
+    if e.Workers() != 1 {
+      tt.Errorf("initial run 1 != %d", e.Workers())
+    }
+  }
+  t.Run("-1", func(tt *testing.T) {
+    minimum(tt, -1, -1)
+    minimum(tt, 0, 0)
+    minimum(tt, 1, 0)
+    minimum(tt, 0, 1)
+  })
+  t.Run("max_gt_min", func(tt *testing.T) {
+    e := NewExecutor(1,10)
+    defer e.Release()
+
+    if e.Workers() != 1 {
+      tt.Errorf("initial run 1 != %d", e.Workers())
+    }
+
+    e.TuneMinWorker(50)
+    time.Sleep(10 * time.Millisecond) // wait start up worker
+
+    if e.MinWorker() != 10 {
+      tt.Errorf("round max size: %d", e.MinWorker())
+    }
+    if e.Workers() != 10 {
+      tt.Errorf("up to 10: %d", e.Workers())
+    }
+
+    e.TuneMaxWorker(50)
+    time.Sleep(10 * time.Millisecond) // wait start up worker
+
+    if e.MinWorker() != 10 {
+      tt.Errorf("still min size 10: %d", e.MinWorker())
+    }
+    if e.MaxWorker() != 50 {
+      tt.Errorf("max worker 50 != %d", e.MaxWorker())
+    }
+    if e.Workers() != 10 {
+      tt.Errorf("still worker 10: %d", e.Workers())
+    }
+
+    e.TuneMinWorker(50)
+    time.Sleep(10 * time.Millisecond) // wait start up worker
+
+    if e.MinWorker() != 50 {
+      tt.Errorf("up to 50: %d", e.MinWorker())
+    }
+    if e.MaxWorker() != 50 {
+      tt.Errorf("max worker 50 != %d", e.MaxWorker())
+    }
+    if e.Workers() != 50 {
+      tt.Errorf("up to 50: %d", e.Workers())
+    }
+  })
+  t.Run("with_ondemand", func(tt *testing.T) {
+    e := NewExecutor(1,10,
+      ExecutorReducderInterval(100 * time.Millisecond),
+    )
+    defer e.Release()
+
+    for i := 0; i < 5; i += 1 {
+      e.Submit(func(){
+        time.Sleep(50 * time.Millisecond)
+      })
+    }
+    time.Sleep(10 * time.Millisecond)
+
+    if e.Workers() != 5 {
+      tt.Errorf("ondemand up: %d", e.Workers())
+    }
+
+    if e.MinWorker() != 1 {
+      tt.Errorf("default min worker 1 != %d", e.MinWorker())
+    }
+
+    e.TuneMinWorker(2)
+    time.Sleep(10 * time.Millisecond)
+
+    if e.MinWorker() != 2 {
+      tt.Errorf("default min worker 2 != %d", e.MinWorker())
+    }
+    if e.Workers() != 5 {
+      tt.Errorf("already running min < curr: %d", e.Workers())
+    }
+
+    time.Sleep(110 * time.Millisecond) // wait reduce
+
+    if e.MinWorker() != 2 {
+      tt.Errorf("default min worker 2 != %d", e.MinWorker())
+    }
+    if e.Workers() != 2 {
+      tt.Errorf("reduced size 2 != %d", e.Workers())
+    }
+
+    e.TuneMinWorker(3)
+    time.Sleep(10 * time.Millisecond)
+
+    if e.MinWorker() != 3 {
+      tt.Errorf("default min worker 3 != %d", e.MinWorker())
+    }
+    if e.Workers() != 3 {
+      tt.Errorf("up to 3 != %d", e.Workers())
     }
   })
 }
