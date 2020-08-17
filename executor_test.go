@@ -581,7 +581,7 @@ func TestExecutorWorkerShrink(t *testing.T) {
 		}
 		for i := 0; i < 30; i += 1 {
 			e.Submit(func() {
-				time.Sleep(30 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 			})
 		}
 		time.Sleep(10 * time.Millisecond) // waiting submitted todo: SubmitAndWait
@@ -626,10 +626,10 @@ func TestExecutorWorkerShrink(t *testing.T) {
 		}
 		for i := 0; i < 5; i += 1 {
 			e.Submit(func() {
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 			})
 		}
-		time.Sleep(5 * time.Millisecond) // waiting submitted
+		time.Sleep(10 * time.Millisecond) // waiting submitted
 
 		r2 := e.Running()
 		w2 := e.Workers()
