@@ -88,7 +88,7 @@ func TestPipelineInOutParameter(t *testing.T) {
 			out: func(t *testing.T) PipelineOutputFunc {
 				return func(result interface{}, err error) {
 					if err != nil {
-						t.Errorf("%w", err)
+						t.Errorf("%s", err.Error())
 					}
 					val, ok := result.(string)
 					if ok != true {
@@ -117,7 +117,7 @@ func TestPipelineInOutParameter(t *testing.T) {
 			out: func(t *testing.T) PipelineOutputFunc {
 				return func(result interface{}, err error) {
 					if err != nil {
-						t.Errorf("%w", err)
+						t.Errorf("%s", err.Error())
 					}
 					val, ok := result.(int)
 					if ok != true {
@@ -150,7 +150,7 @@ func TestPipelineInOutParameter(t *testing.T) {
 			out: func(t *testing.T) PipelineOutputFunc {
 				return func(result interface{}, err error) {
 					if err != nil {
-						t.Errorf("%w", err)
+						t.Errorf("%s", err.Error())
 					}
 					val, ok := result.(*Foo)
 					if ok != true {
