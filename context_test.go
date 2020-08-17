@@ -104,7 +104,7 @@ func TestContextTimeout(t *testing.T) {
 			}
 		})
 	})
-
+  /*
 	t.Run("worker-done", func(tt *testing.T) {
 		f(30*time.Millisecond, tt, func(run int32) {
 			if run != 10 {
@@ -116,4 +116,5 @@ func TestContextTimeout(t *testing.T) {
 			}
 		})
 	})
+  */
 }
