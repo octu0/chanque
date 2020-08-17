@@ -514,144 +514,144 @@ func TestExecutorSubmitNonBlocking(t *testing.T) {
 	}
 }
 
-//func TestExecutorWorkerShrink(t *testing.T) {
-//	t.Run("min0/max10/job10", func(tt *testing.T) {
-//		e := NewExecutor(0, 10,
-//			ExecutorReducderInterval(50*time.Millisecond),
-//			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
-//				/* nop */
-//			}),
-//		)
-//		defer e.Release()
-//
-//		r1 := e.Running()
-//		w1 := e.Workers()
-//
-//		if r1 != 0 {
-//			tt.Errorf("initial run is zero %v", r1)
-//		}
-//		if w1 != 0 {
-//			tt.Errorf("initial worker is zero %v", w1)
-//		}
-//		for i := 0; i < 10; i += 1 {
-//			e.Submit(func() {
-//				time.Sleep(50 * time.Millisecond)
-//			})
-//		}
-//		time.Sleep(10 * time.Millisecond) // waiting submitted
-//
-//		r2 := e.Running()
-//		w2 := e.Workers()
-//		if r2 != 10 {
-//			tt.Errorf("running worker 10 != %v", r2)
-//		}
-//		if w2 != 10 {
-//			tt.Errorf("generated workers 10 != %v", w2)
-//		}
-//
-//		time.Sleep(100 * time.Millisecond)
-//
-//		r3 := e.Running()
-//		w3 := e.Workers()
-//		if r3 != 0 {
-//			tt.Errorf("done for all worker %v", r3)
-//		}
-//		if w3 != 0 {
-//			tt.Errorf("worker shrink to min size0 %v", w3)
-//		}
-//	})
-//	t.Run("min10/max30/job30", func(tt *testing.T) {
-//		e := NewExecutor(10, 30,
-//			ExecutorReducderInterval(50*time.Millisecond),
-//			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
-//				/* nop */
-//			}),
-//		)
-//		defer e.Release()
-//		time.Sleep(10 * time.Millisecond) // todo worker startup WaitGroup
-//
-//		r1 := e.Running()
-//		w1 := e.Workers()
-//
-//		if r1 != 0 {
-//			tt.Errorf("initial run is zero %v", r1)
-//		}
-//		if w1 != 10 {
-//			tt.Errorf("initial worker is 10 %v", w1)
-//		}
-//		for i := 0; i < 30; i += 1 {
-//			e.Submit(func() {
-//				time.Sleep(50 * time.Millisecond)
-//			})
-//		}
-//		time.Sleep(10 * time.Millisecond) // waiting submitted todo: SubmitAndWait
-//
-//		r2 := e.Running()
-//		w2 := e.Workers()
-//		if (10 <= r2 && r2 <= 30) != true {
-//			tt.Errorf("running worker around 30 != %v", r2)
-//		}
-//		if (10 <= w2 && w2 <= 30) != true {
-//			tt.Errorf("generated workers around 30 != %v", w2)
-//		}
-//
-//		time.Sleep(100 * time.Millisecond)
-//
-//		r3 := e.Running()
-//		w3 := e.Workers()
-//		if r3 != 0 {
-//			tt.Errorf("done for all worker %v", r3)
-//		}
-//		if w3 != 10 {
-//			tt.Errorf("worker shrink to min size10 %v", w3)
-//		}
-//	})
-//	t.Run("min10/max30/job5", func(tt *testing.T) {
-//		e := NewExecutor(10, 30,
-//			ExecutorReducderInterval(50*time.Millisecond),
-//			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
-//				/* nop */
-//			}),
-//		)
-//		defer e.Release()
-//
-//		r1 := e.Running()
-//		w1 := e.Workers()
-//
-//		if r1 != 0 {
-//			tt.Errorf("initial run is zero %v", r1)
-//		}
-//		if w1 != 10 {
-//			tt.Errorf("initial worker is 10 %v", w1)
-//		}
-//		for i := 0; i < 5; i += 1 {
-//			e.Submit(func() {
-//				time.Sleep(50 * time.Millisecond)
-//			})
-//		}
-//		time.Sleep(10 * time.Millisecond) // waiting submitted
-//
-//		r2 := e.Running()
-//		w2 := e.Workers()
-//		if r2 != 5 {
-//			tt.Errorf("running worker 5 != %v", r2)
-//		}
-//		if w2 != 10 {
-//			tt.Errorf("generated workers 10 != %v", w2)
-//		}
-//
-//		time.Sleep(100 * time.Millisecond)
-//
-//		r3 := e.Running()
-//		w3 := e.Workers()
-//		if r3 != 0 {
-//			tt.Errorf("done for all worker %v", r3)
-//		}
-//		if w3 != 10 {
-//			tt.Errorf("worker shrink to min size10 %v", w3)
-//		}
-//	})
-//}
+func TestExecutorWorkerShrink(t *testing.T) {
+	t.Run("min0/max10/job10", func(tt *testing.T) {
+		e := NewExecutor(0, 10,
+			ExecutorReducderInterval(50*time.Millisecond),
+			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
+				/* nop */
+			}),
+		)
+		defer e.Release()
+
+		r1 := e.Running()
+		w1 := e.Workers()
+
+		if r1 != 0 {
+			tt.Errorf("initial run is zero %v", r1)
+		}
+		if w1 != 0 {
+			tt.Errorf("initial worker is zero %v", w1)
+		}
+		for i := 0; i < 10; i += 1 {
+			e.Submit(func() {
+				time.Sleep(50 * time.Millisecond)
+			})
+		}
+		time.Sleep(10 * time.Millisecond) // waiting submitted
+
+		r2 := e.Running()
+		w2 := e.Workers()
+		if r2 != 10 {
+			tt.Errorf("running worker 10 != %v", r2)
+		}
+		if w2 != 10 {
+			tt.Errorf("generated workers 10 != %v", w2)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		r3 := e.Running()
+		w3 := e.Workers()
+		if r3 != 0 {
+			tt.Errorf("done for all worker %v", r3)
+		}
+		if w3 != 0 {
+			tt.Errorf("worker shrink to min size0 %v", w3)
+		}
+	})
+	t.Run("min10/max30/job30", func(tt *testing.T) {
+		e := NewExecutor(10, 30,
+			ExecutorReducderInterval(50*time.Millisecond),
+			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
+				/* nop */
+			}),
+		)
+		defer e.Release()
+		time.Sleep(10 * time.Millisecond) // todo worker startup WaitGroup
+
+		r1 := e.Running()
+		w1 := e.Workers()
+
+		if r1 != 0 {
+			tt.Errorf("initial run is zero %v", r1)
+		}
+		if w1 != 10 {
+			tt.Errorf("initial worker is 10 %v", w1)
+		}
+		for i := 0; i < 30; i += 1 {
+			e.Submit(func() {
+				time.Sleep(50 * time.Millisecond)
+			})
+		}
+		time.Sleep(10 * time.Millisecond) // waiting submitted todo: SubmitAndWait
+
+		r2 := e.Running()
+		w2 := e.Workers()
+		if (10 <= r2 && r2 <= 30) != true {
+			tt.Errorf("running worker around 30 != %v", r2)
+		}
+		if (10 <= w2 && w2 <= 30) != true {
+			tt.Errorf("generated workers around 30 != %v", w2)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		r3 := e.Running()
+		w3 := e.Workers()
+		if r3 != 0 {
+			tt.Errorf("done for all worker %v", r3)
+		}
+		if w3 != 10 {
+			tt.Errorf("worker shrink to min size10 %v", w3)
+		}
+	})
+	t.Run("min10/max30/job5", func(tt *testing.T) {
+		e := NewExecutor(10, 30,
+			ExecutorReducderInterval(50*time.Millisecond),
+			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
+				/* nop */
+			}),
+		)
+		defer e.Release()
+
+		r1 := e.Running()
+		w1 := e.Workers()
+
+		if r1 != 0 {
+			tt.Errorf("initial run is zero %v", r1)
+		}
+		if w1 != 10 {
+			tt.Errorf("initial worker is 10 %v", w1)
+		}
+		for i := 0; i < 5; i += 1 {
+			e.Submit(func() {
+				time.Sleep(50 * time.Millisecond)
+			})
+		}
+		time.Sleep(10 * time.Millisecond) // waiting submitted
+
+		r2 := e.Running()
+		w2 := e.Workers()
+		if r2 != 5 {
+			tt.Errorf("running worker 5 != %v", r2)
+		}
+		if w2 != 10 {
+			tt.Errorf("generated workers 10 != %v", w2)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		r3 := e.Running()
+		w3 := e.Workers()
+		if r3 != 0 {
+			tt.Errorf("done for all worker %v", r3)
+		}
+		if w3 != 10 {
+			tt.Errorf("worker shrink to min size10 %v", w3)
+		}
+	})
+}
 
 func TestSubExecutor(t *testing.T) {
 	t.Run("parent max cap", func(tt *testing.T) {
@@ -851,54 +851,54 @@ func TestExecutorTune(t *testing.T) {
 			tt.Errorf("up to 50: %d", e.Workers())
 		}
 	})
-//	t.Run("with_ondemand", func(tt *testing.T) {
-//		e := NewExecutor(1, 10,
-//			ExecutorReducderInterval(50*time.Millisecond),
-//		)
-//		defer e.Release()
-//
-//		for i := 0; i < 5; i += 1 {
-//			e.Submit(func() {
-//				time.Sleep(150 * time.Millisecond)
-//			})
-//		}
-//		time.Sleep(50 * time.Millisecond)
-//
-//		if e.Workers() != 5 {
-//			tt.Errorf("ondemand up: %d", e.Workers())
-//		}
-//
-//		if e.MinWorker() != 1 {
-//			tt.Errorf("default min worker 1 != %d", e.MinWorker())
-//		}
-//
-//		e.TuneMinWorker(2)
-//		time.Sleep(50 * time.Millisecond)
-//
-//		if e.MinWorker() != 2 {
-//			tt.Errorf("default min worker 2 != %d", e.MinWorker())
-//		}
-//		if e.Workers() != 5 {
-//			tt.Errorf("already running min < curr: %d", e.Workers())
-//		}
-//
-//		time.Sleep(200 * time.Millisecond) // wait reduce
-//
-//		if e.MinWorker() != 2 {
-//			tt.Errorf("default min worker 2 != %d", e.MinWorker())
-//		}
-//		if e.Workers() != 2 {
-//			tt.Errorf("reduced size 2 != %d", e.Workers())
-//		}
-//
-//		e.TuneMinWorker(3)
-//		time.Sleep(50 * time.Millisecond)
-//
-//		if e.MinWorker() != 3 {
-//			tt.Errorf("default min worker 3 != %d", e.MinWorker())
-//		}
-//		if e.Workers() != 3 {
-//			tt.Errorf("up to 3 != %d", e.Workers())
-//		}
-//	})
+	t.Run("with_ondemand", func(tt *testing.T) {
+		e := NewExecutor(1, 10,
+			ExecutorReducderInterval(50*time.Millisecond),
+		)
+		defer e.Release()
+
+		for i := 0; i < 5; i += 1 {
+			e.Submit(func() {
+				time.Sleep(50 * time.Millisecond)
+			})
+		}
+		time.Sleep(10 * time.Millisecond)
+
+		if e.Workers() != 5 {
+			tt.Errorf("ondemand up: %d", e.Workers())
+		}
+
+		if e.MinWorker() != 1 {
+			tt.Errorf("default min worker 1 != %d", e.MinWorker())
+		}
+
+		e.TuneMinWorker(2)
+		time.Sleep(10 * time.Millisecond)
+
+		if e.MinWorker() != 2 {
+			tt.Errorf("default min worker 2 != %d", e.MinWorker())
+		}
+		if e.Workers() != 5 {
+			tt.Errorf("already running min < curr: %d", e.Workers())
+		}
+
+		time.Sleep(110 * time.Millisecond) // wait reduce
+
+		if e.MinWorker() != 2 {
+			tt.Errorf("default min worker 2 != %d", e.MinWorker())
+		}
+		if e.Workers() != 2 {
+			tt.Errorf("reduced size 2 != %d", e.Workers())
+		}
+
+		e.TuneMinWorker(3)
+		time.Sleep(10 * time.Millisecond)
+
+		if e.MinWorker() != 3 {
+			tt.Errorf("default min worker 3 != %d", e.MinWorker())
+		}
+		if e.Workers() != 3 {
+			tt.Errorf("up to 3 != %d", e.Workers())
+		}
+	})
 }
