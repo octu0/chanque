@@ -851,54 +851,54 @@ func TestExecutorTune(t *testing.T) {
 			tt.Errorf("up to 50: %d", e.Workers())
 		}
 	})
-	t.Run("with_ondemand", func(tt *testing.T) {
-		e := NewExecutor(1, 10,
-			ExecutorReducderInterval(50*time.Millisecond),
-		)
-		defer e.Release()
-
-		for i := 0; i < 5; i += 1 {
-			e.Submit(func() {
-				time.Sleep(150 * time.Millisecond)
-			})
-		}
-		time.Sleep(50 * time.Millisecond)
-
-		if e.Workers() != 5 {
-			tt.Errorf("ondemand up: %d", e.Workers())
-		}
-
-		if e.MinWorker() != 1 {
-			tt.Errorf("default min worker 1 != %d", e.MinWorker())
-		}
-
-		e.TuneMinWorker(2)
-		time.Sleep(50 * time.Millisecond)
-
-		if e.MinWorker() != 2 {
-			tt.Errorf("default min worker 2 != %d", e.MinWorker())
-		}
-		if e.Workers() != 5 {
-			tt.Errorf("already running min < curr: %d", e.Workers())
-		}
-
-		time.Sleep(200 * time.Millisecond) // wait reduce
-
-		if e.MinWorker() != 2 {
-			tt.Errorf("default min worker 2 != %d", e.MinWorker())
-		}
-		if e.Workers() != 2 {
-			tt.Errorf("reduced size 2 != %d", e.Workers())
-		}
-
-		e.TuneMinWorker(3)
-		time.Sleep(50 * time.Millisecond)
-
-		if e.MinWorker() != 3 {
-			tt.Errorf("default min worker 3 != %d", e.MinWorker())
-		}
-		if e.Workers() != 3 {
-			tt.Errorf("up to 3 != %d", e.Workers())
-		}
-	})
+//	t.Run("with_ondemand", func(tt *testing.T) {
+//		e := NewExecutor(1, 10,
+//			ExecutorReducderInterval(50*time.Millisecond),
+//		)
+//		defer e.Release()
+//
+//		for i := 0; i < 5; i += 1 {
+//			e.Submit(func() {
+//				time.Sleep(150 * time.Millisecond)
+//			})
+//		}
+//		time.Sleep(50 * time.Millisecond)
+//
+//		if e.Workers() != 5 {
+//			tt.Errorf("ondemand up: %d", e.Workers())
+//		}
+//
+//		if e.MinWorker() != 1 {
+//			tt.Errorf("default min worker 1 != %d", e.MinWorker())
+//		}
+//
+//		e.TuneMinWorker(2)
+//		time.Sleep(50 * time.Millisecond)
+//
+//		if e.MinWorker() != 2 {
+//			tt.Errorf("default min worker 2 != %d", e.MinWorker())
+//		}
+//		if e.Workers() != 5 {
+//			tt.Errorf("already running min < curr: %d", e.Workers())
+//		}
+//
+//		time.Sleep(200 * time.Millisecond) // wait reduce
+//
+//		if e.MinWorker() != 2 {
+//			tt.Errorf("default min worker 2 != %d", e.MinWorker())
+//		}
+//		if e.Workers() != 2 {
+//			tt.Errorf("reduced size 2 != %d", e.Workers())
+//		}
+//
+//		e.TuneMinWorker(3)
+//		time.Sleep(50 * time.Millisecond)
+//
+//		if e.MinWorker() != 3 {
+//			tt.Errorf("default min worker 3 != %d", e.MinWorker())
+//		}
+//		if e.Workers() != 3 {
+//			tt.Errorf("up to 3 != %d", e.Workers())
+//		}
+//	})
 }
