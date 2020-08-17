@@ -371,7 +371,7 @@ import (
 //			tt.Errorf("loop running: %d", e.Running())
 //		}
 //	})
-}
+//}
 func TestLoopStop(t *testing.T) {
 	t.Run("ticker", func(tt *testing.T) {
 		e := NewExecutor(1, 1)
