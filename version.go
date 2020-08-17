@@ -1,5 +1,5 @@
 package chanque
 
-const(
-  Version string = "1.0.9"
+const (
+	Version string = "1.0.9"
 )
