@@ -535,7 +535,7 @@ func TestExecutorWorkerShrink(t *testing.T) {
 		}
 		for i := 0; i < 10; i += 1 {
 			e.Submit(func() {
-				time.Sleep(10 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 			})
 		}
 		time.Sleep(10 * time.Millisecond) // waiting submitted
