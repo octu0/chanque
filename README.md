@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/octu0/chanque)](https://goreportcard.com/report/github.com/octu0/chanque)
 [![Releases](https://img.shields.io/github/v/release/octu0/chanque)](https://github.com/octu0/chanque/releases)
 
-`chanque` provides a simple workload for channel and goroutine.
+`chanque` provides a simple framework for asynchronous programming and goroutine management and safe use of channels.
 
 ## Installation
 
