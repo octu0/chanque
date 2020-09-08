@@ -33,3 +33,20 @@ func defaultPanicHandler(pt PanicType, rcv interface{}) {
 func noopPanicHandler(PanicType, interface{}) {
 	/* noop */
 }
+
+type ValueError interface {
+	Value() interface{}
+	Err() error
+}
+
+type tupleValueError struct {
+	value interface{}
+	err   error
+}
+
+func (r *tupleValueError) Value() interface{} {
+	return r.value
+}
+func (r *tupleValueError) Err() error {
+	return r.err
+}

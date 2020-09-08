@@ -351,22 +351,24 @@ type SubExecutor struct {
 }
 
 func newSubExecutor(parent *Executor) *SubExecutor {
-	s := new(SubExecutor)
-	s.parent = parent
-	s.wg = new(sync.WaitGroup)
-	return s
+	return &SubExecutor{
+		parent: parent,
+		wg:     new(sync.WaitGroup),
+	}
 }
 
 func (s *SubExecutor) Submit(fn Job) {
 	s.wg.Add(1)
-	s.parent.Submit(func(w *sync.WaitGroup) Job {
-		return func() {
-			defer w.Done()
-			fn()
-		}
-	}(s.wg))
+	s.parent.Submit(runSubExec(s.wg, fn))
 }
 
 func (s *SubExecutor) Wait() {
 	s.wg.Wait()
+}
+
+func runSubExec(wg *sync.WaitGroup, fn Job) Job {
+	return func() {
+		defer wg.Done()
+		fn()
+	}
 }
