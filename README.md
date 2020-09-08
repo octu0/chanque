@@ -21,34 +21,34 @@ Queue implementation.
 It provides blocking and non-blocking methods, as well as panic handling of channels.
 
 ```go
-import(
-  "fmt"
-  "github.com/octu0/chanque"
+import (
+	"fmt"
+	"github.com/octu0/chanque"
 )
 
-func main(){
-  que1 := chanque.NewQueue(10)
-  defer que1.Close()
+func main() {
+	que1 := chanque.NewQueue(10)
+	defer que1.Close()
 
-  go func(){
-    for {
-      val := que1.Dequeue()
-      fmt.Println(val.(string))
-    }
-  }()
-  if ok := que1.Enqueue("hello"); ok {
-    fmt.Println("enqueue")
-  }
+	go func() {
+		for {
+			val := que1.Dequeue()
+			fmt.Println(val.(string))
+		}
+	}()
+	if ok := que1.Enqueue("hello"); ok {
+		fmt.Println("enqueue")
+	}
 
-  que2 := chanque.NewQueue(10,
-    QueuePanicHandler(func(pt chanque.PanicType, rcv interface{}) {
-      fmt.Println("panic occurred", rcv.(error))
-    }),
-  )
-  defer que2.Close()
-  if ok := que2.EnqueueNB("world w/ non-blocking enqueue"); ok {
-    fmt.Println("enqueue")
-  }
+	que2 := chanque.NewQueue(10,
+		QueuePanicHandler(func(pt chanque.PanicType, rcv interface{}) {
+			fmt.Println("panic occurred", rcv.(error))
+		}),
+	)
+	defer que2.Close()
+	if ok := que2.EnqueueNB("world w/ non-blocking enqueue"); ok {
+		fmt.Println("enqueue")
+	}
 }
 ```
 
@@ -59,54 +59,54 @@ which limits the number of concurrent executions of goroutines and creates gorou
 and can also be used as goroutine resource management.
 
 ```go
-import(
-  "fmt"
-  "time"
-  "github.com/octu0/chanque"
+import (
+	"fmt"
+	"time"
+	"github.com/octu0/chanque"
 )
 
-func main(){
-  // minWorker 1 maxWorker 2 
-  exec := chanque.NewExecutor(1, 2) 
-  defer exec.Release()
+func main() {
+	// minWorker 1 maxWorker 2
+	exec := chanque.NewExecutor(1, 2)
+	defer exec.Release()
 
-  exec.Submit(func(){
-    fmt.Println("job1")
-    time.Sleep(1 * time.Second)
-  })
-  exec.Submit(func(){
-    fmt.Println("job2")
-    time.Sleep(1 * time.Second)
-  })
+	exec.Submit(func() {
+		fmt.Println("job1")
+		time.Sleep(1 * time.Second)
+	})
+	exec.Submit(func() {
+		fmt.Println("job2")
+		time.Sleep(1 * time.Second)
+	})
 
-  // Blocking because it became the maximum number of workers, 
-  // executing when there are no more workers running
-  exec.Submit(func(){
-    fmt.Println("job3")
-  })
+	// Blocking because it became the maximum number of workers,
+	// executing when there are no more workers running
+	exec.Submit(func() {
+		fmt.Println("job3")
+	})
 
-  // Generate goroutines on demand up to the maximum number of workers.
-  // Submit does not block up to the size of MaxCapacity
-  // Workers that are not running are recycled to minWorker at the time of ReduceInterval.
-  exec2 := chanque.NewExecutor(10, 50,
-    chanque.ExecutorMaxCapacicy(1000),
-    chanque.ExecutorReducderInterval(60 * time.Second),
-  )
-  defer exec2.Release()
+	// Generate goroutines on demand up to the maximum number of workers.
+	// Submit does not block up to the size of MaxCapacity
+	// Workers that are not running are recycled to minWorker at the time of ReduceInterval.
+	exec2 := chanque.NewExecutor(10, 50,
+		chanque.ExecutorMaxCapacicy(1000),
+		chanque.ExecutorReducderInterval(60*time.Second),
+	)
+	defer exec2.Release()
 
-  for i := 0; i < 100; i += 1 {
-    exec2.Submit(func(i id) func() {
-      return func() {
-        fmt.Println("heavy process", id)
-        time.Sleep(100 * time.Millisecond)
-        fmt.Println("done process", id)
-      }
-    }(i))
-  }
+	for i := 0; i < 100; i += 1 {
+		exec2.Submit(func(i id) func() {
+			return func() {
+				fmt.Println("heavy process", id)
+				time.Sleep(100 * time.Millisecond)
+				fmt.Println("done process", id)
+			}
+		}(i))
+	}
 
-  // On-demand tune min/max worker size
-  exec.TuneMaxWorker(10)
-  exec.TuneMinWorker(5)
+	// On-demand tune min/max worker size
+	exec.TuneMaxWorker(10)
+	exec.TuneMinWorker(5)
 }
 ```
 
@@ -117,55 +117,100 @@ Enqueue of parameter is blocked while WorkerHandler is running.
 There is also a BufferWorker implementation that non-blocking enqueue during asynchronous execution.
 
 ```go
-import(
-  "fmt"
-  "time"
-  "context"
-  "github.com/octu0/chanque"
+import (
+	"context"
+	"fmt"
+	"time"
+	"github.com/octu0/chanque"
 )
 
-func main(){
-  handler := func(param interface{}) {
-    if s, ok := param.(string); ok {
-      fmt.Println(s)
-    }
-    time.Sleep(1 * time.Second)
-  }
-  w1 := chanque.NewDefaultWorker(handler)
-  defer w1.Shutdown()
+func main() {
+	handler := func(param interface{}) {
+		if s, ok := param.(string); ok {
+			fmt.Println(s)
+		}
+		time.Sleep(1 * time.Second)
+	}
 
-  go func(){
-    w1.Enqueue("hello")
-    w1.Enqueue("world") // blocking during 1 sec
-  }()
+	// DefaultWorker executes in order, waiting for the previous one
+	w1 := chanque.NewDefaultWorker(handler)
+	defer w1.Shutdown()
 
-  w2 := chanque.NewBufferWorker(handler)
-  defer w2.Shutdown()
+	go func() {
+		w1.Enqueue("hello")
+		w1.Enqueue("world") // blocking during 1 sec
+	}()
 
-  go func(){
-    w2.Enqueue("hello")
-    w2.Enqueue("world") // non-blocking
-  }()
+	w2 := chanque.NewBufferWorker(handler)
+	defer w2.Shutdown()
 
-  // BufferWorker provides helpers for performing sequential operations
-  // by using PreHook and PostHook to perform the operations collectively.
-  pre := func(){
-    db.Begin()
-  }
-  post := func(){
-    db.Commit()
-  }
-  hnd := func(param interface{}) {
-    db.Insert(param.(string))
-  }
-  w3 := chanque.NewBufferWorker(hnd,
-    WorkerPreHook(pre),
-    WorkerPostHook(post),
-  )
-  for i := 0; i < 100; i += 1 {
-    w3.Enqueue(strconv.Itoa(i))
-  }
-  w3.ShutdownAndWait()
+	go func() {
+		w2.Enqueue("hello")
+		w2.Enqueue("world") // non-blocking
+	}()
+
+	// BufferWorker provides helpers for performing sequential operations
+	// by using PreHook and PostHook to perform the operations collectively.
+	pre := func() {
+		db.Begin()
+	}
+	post := func() {
+		db.Commit()
+	}
+	hnd := func(param interface{}) {
+		db.Insert(param.(string))
+	}
+	w3 := chanque.NewBufferWorker(hnd,
+		WorkerPreHook(pre),
+		WorkerPostHook(post),
+	)
+	for i := 0; i < 100; i += 1 {
+		w3.Enqueue(strconv.Itoa(i))
+	}
+	w3.ShutdownAndWait()
+}
+```
+
+### Parallel
+
+Parallel provides for executing in parallel and acquiring the execution result.  
+extended implementation of Worker.
+
+```go
+package main
+
+import (
+	"errors"
+	"github.com/octu0/chanque"
+)
+
+func main() {
+	executor := chanque.NewExecutor(10, 100)
+	defer executor.Release()
+
+	para := chanque.NewParallel(
+		executor,
+		chanque.Parallelism(2),
+	)
+	para.Queue(func() (interface{}, error) {
+		return "#1 result", nil
+	})
+	para.Queue(func() (interface{}, error) {
+		return "#2 result", nil
+	})
+	para.Queue(func() (interface{}, error) {
+		return nil, errors.New("#3 error")
+	})
+
+	future := para.Submit()
+	for _, r := range future.Result() {
+		if r.Value() != nil {
+			println("result:", r.Value().(string))
+		}
+		if r.Err() != nil {
+			println("error:", r.Err().Error())
+		}
+	}
 }
 ```
 
@@ -175,37 +220,37 @@ Pipeline provides sequential asynchronous input and output.
 Execute func combination asynchronously
 
 ```go
-import(
-  "fmt"
-  "time"
-  "context"
-  "github.com/octu0/chanque"
+import (
+	"context"
+	"fmt"
+	"time"
+	"github.com/octu0/chanque"
 )
 
-func main(){
-  calcFn := func(parameter interface{}) (interface{}, error) {
-    // heavy process
-    time.Sleep(1 * time.Second)
+func main() {
+	calcFn := func(parameter interface{}) (interface{}, error) {
+		// heavy process
+		time.Sleep(1 * time.Second)
 
-    if val, ok := parameter.(int); ok {
-      return val * 2, nil
-    }
-    return -1, fmt.Errorf("invalid parameter")
-  }
-  outFn := func(result interface{}, err error) {
-    if err != nil {
-       fmt.Fatal(err)
-       return
-    }
+		if val, ok := parameter.(int); ok {
+			return val * 2, nil
+		}
+		return -1, fmt.Errorf("invalid parameter")
+	}
+	outFn := func(result interface{}, err error) {
+		if err != nil {
+			fmt.Fatal(err)
+			return
+		}
 
-    fmt.Println("value =", parameter.(int))
-  }
+		fmt.Println("value =", parameter.(int))
+	}
 
-  pipe := chanque.NewPipeline(calcFn, outFn)
-  pipe.Enqueue(10)
-  pipe.Enqueue(20)
-  pipe.Enqueue(30)
-  pipe.ShutdownAndWait()
+	pipe := chanque.NewPipeline(calcFn, outFn)
+	pipe.Enqueue(10)
+	pipe.Enqueue(20)
+	pipe.Enqueue(30)
+	pipe.ShutdownAndWait()
 }
 ```
 
@@ -215,53 +260,53 @@ Context/ContextTimeout provides a method for the waiting process
 Both apply and use a function that will be called when all operations are complete  
 
 ```go
-import(
-  "fmt"
-  "github.com/octu0/chanque"
+import (
+	"fmt"
+	"github.com/octu0/chanque"
 )
 
-func main(){
-  e := NewExecutor(1, 10)
-  defer e.Relase()
+func main() {
+	e := chanque.NewExecutor(1, 10)
+	defer e.Relase()
 
-  heavyProcessA := func(done chanque.DoneFunc) {
-    defer done()
-    time.Sleep(1 * time.Second) // heavy process
-  }
-  heavyProcessB := func(done chanque.DoneFunc) {
-    defer done()
-    time.Sleep(5 * time.Second) // heavy process
-  }
+	heavyProcessA := func(done chanque.DoneFunc) {
+		defer done()
+		time.Sleep(1 * time.Second) // heavy process
+	}
+	heavyProcessB := func(done chanque.DoneFunc) {
+		defer done()
+		time.Sleep(5 * time.Second) // heavy process
+	}
 
-  ctx := chanque.NewContext(e, func(){
-    fmt.Printf("all done")
-  })
+	ctx := chanque.NewContext(e, func() {
+		fmt.Printf("all done")
+	})
 
-  go func(d chanque.DoneFunc) {
-    heavyProcessA(d)
-  }(ctx.Add())
+	go func(d chanque.DoneFunc) {
+		heavyProcessA(d)
+	}(ctx.Add())
 
-  go func(d chanque.DoneFunc) {
-    heavyProcessB(d)
-  }(ctx.Add())
+	go func(d chanque.DoneFunc) {
+		heavyProcessB(d)
+	}(ctx.Add())
 
-  ctx.Wait()
+	ctx.Wait()
 
-  // ContextTimeout is used to execute 
-  // a process without waiting for each operation to complete.
-  ctxTO := chanque.NewContextTimeout(e, func(){
-    fmt.Printf("all done w/o sub process done")
-  }, 1 * time.Second)
+	// ContextTimeout is used to execute
+	// a process without waiting for each operation to complete.
+	ctxTO := chanque.NewContextTimeout(e, func() {
+		fmt.Printf("all done w/o sub process done")
+	}, 1*time.Second)
 
-  go func(d chanque.DoneFunc) {
-    heavyProcessA(d)
-  }(ctxTO.Add())
+	go func(d chanque.DoneFunc) {
+		heavyProcessA(d)
+	}(ctxTO.Add())
 
-  go func(d chanque.DoneFunc) {
-    heavyProcessB(d)
-  }(ctxTO.Add())
+	go func(d chanque.DoneFunc) {
+		heavyProcessB(d)
+	}(ctxTO.Add())
 
-  ctxTO.Background()
+	ctxTO.Background()
 }
 ```
 
@@ -275,72 +320,75 @@ You can use callbacks with Queue and time.Ticker.
 // old loop
 //
 func bar(ctx context.Context, queue chan string, done chan struct{}) {
-  for {
-    select {
-    case <-ctx.Done():
-      return
+	for {
+		select {
+		case <-ctx.Done():
+			return
 
-    case v := <-queue:
-      println("queue=", v)
+		case v := <-queue:
+			println("queue=", v)
 
-    case <-done:
-      return
-    }
-  }
+		case <-done:
+			return
+		}
+	}
 }
-func foo(parent context.Context){
-  ctx, cancel := context.WithTimeout(parent, 1 * time.Second)
-  queue := make(chan string)
-  done  := make(chan struct{})
-  go bar(ctx, queue, done)
-  go func(){
-    queue <-"hello1"
-    queue <-"hello2"
-    time.Sleep(1 * time.Second)
-    queue <-"world" // blocking! == no goroutine reader to queue
-  }()
+func foo(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 1*time.Second)
+	queue := make(chan string)
+	done := make(chan struct{})
+	go bar(ctx, queue, done)
+	go func() {
+		queue <- "hello1"
+		queue <- "hello2"
+		time.Sleep(1 * time.Second)
+		queue <- "world" // blocking! == no goroutine reader to queue
+	}()
 
-  go func(){
-    time.Sleep(1 * time.Second)
-    done <-struct{}{} // blocking! == no goroutine reader to done
-  }()
+	go func() {
+		time.Sleep(1 * time.Second)
+		done <- struct{}{} // blocking! == no goroutine reader to done
+	}()
 
-  go func(){
-    <-other.chan
-    cancel()
-  }()
+	go func() {
+		select {
+		case <-time.After(10 * time.Second):
+			cancel()
+			return
+		}
+	}()
 }
 
 //
 // new loop
 //
-func main(){
-  e := NewExecutor(1, 10)
+func newloop() {
+	e := NewExecutor(1, 10)
 
-  queue := NewQueue(0)
-  
-  loop := NewLoop(e)
-  loop.SetDequeue(func(val interface{}, ok bool) chanque.LoopNext {
-    if ok != true {
-      // queue closed
-      return chanque.LoopNextBreak
-    }
-    println("queue=", val.(string))
-    return chanque.LoopNextContinue
-  }, queue)
+	queue := NewQueue(0)
 
-  loop.ExecuteTimeout(1 * time.Second)
+	loop := NewLoop(e)
+	loop.SetDequeue(func(val interface{}, ok bool) chanque.LoopNext {
+		if ok != true {
+			// queue closed
+			return chanque.LoopNextBreak
+		}
+		println("queue=", val.(string))
+		return chanque.LoopNextContinue
+	}, queue)
 
-  go func(){
-    queue.Enqueue("hello1")
-    queue.Enqueue("hello2")
-    time.Sleep(1 * time.Second)
-    queue.EnqueueNB("world") // Enqueue / EnqueueNB / EnqueueRetry
-  }()
-  go func(){
-    time.Sleep(1 * time.Second)
-    loop.Stop() // done for loop
-  }()
+	loop.ExecuteTimeout(10 * time.Second)
+
+	go func() {
+		queue.Enqueue("hello1")
+		queue.Enqueue("hello2")
+		time.Sleep(1 * time.Second)
+		queue.EnqueueNB("world") // Enqueue / EnqueueNB / EnqueueRetry
+	}()
+	go func() {
+		time.Sleep(1 * time.Second)
+		loop.Stop() // done for loop
+	}()
 }
 ```
 
@@ -400,6 +448,21 @@ func(Worker) Enqueue(parameter interface{}) bool
 func(Worker) CloseEnqueue() bool
 func(Worker) Shutdown()
 func(Worker) ShutdownAndWait()
+```
+
+### type `Parallel`
+
+```
+type ParallelJob func() (result interface{}, err error)
+NewParallel(*Executor) *Parallel
+
+func (*Parallel) Queue(ParallelJob)
+func (*Parallel) Submit() *ParallelFuture
+
+func (*ParallelFuture) Result() []ValueError
+
+func (ValueError) Value() interface{}
+func (ValueError) Err()   error
 ```
 
 ### type `Pipeline`
