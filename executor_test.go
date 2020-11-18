@@ -584,7 +584,7 @@ func TestExecutorWorkerShrink(t *testing.T) {
 				time.Sleep(50 * time.Millisecond)
 			})
 		}
-		time.Sleep(10 * time.Millisecond) // waiting submitted todo: SubmitAndWait
+		time.Sleep(30 * time.Millisecond) // waiting submitted todo: SubmitAndWait
 
 		r2 := e.Running()
 		w2 := e.Workers()
