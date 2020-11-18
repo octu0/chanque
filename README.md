@@ -177,8 +177,6 @@ Parallel provides for executing in parallel and acquiring the execution result.
 extended implementation of Worker.
 
 ```go
-package main
-
 import (
 	"errors"
 	"github.com/octu0/chanque"
@@ -211,6 +209,41 @@ func main() {
 			println("error:", r.Err().Error())
 		}
 	}
+}
+```
+
+### Retry
+
+Retry provides function retry based on the exponential backoff algorithm.
+
+```go
+import (
+	"context"
+	"fmt"
+	"github.com/octu0/chanque"
+)
+
+func main() {
+	retry := chanque.Retry(
+		chanque.RetryMax(10),
+		chanque.RetryBackoffIntervalMin(100*time.Millisecond),
+		chanque.RetryBackoffIntervalMax(30*time.Second),
+	)
+	future := retry.Retry(func(ctx context.Context) (interface{}, error) {
+		req, _ := http.NewRequest("GET", url, nil)
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		...
+		return ioutil.ReadAll(resp.Body), nil
+	})
+	r := future.Result()
+	if err := r.Err(); err != nil {
+		panic(err.Error())
+	}
+	fmt.Printf("GET resp = %s", r.Value().([]byte))
 }
 ```
 
@@ -460,6 +493,27 @@ func (*Parallel) Queue(ParallelJob)
 func (*Parallel) Submit() *ParallelFuture
 
 func (*ParallelFuture) Result() []ValueError
+
+func (ValueError) Value() interface{}
+func (ValueError) Err()   error
+```
+
+### type `Retry`
+
+```
+type RetryFunc func(context.Context) (result interface{}, err error)
+type RetryErrorHandler func(err error, b *Backoff) RetryNext
+
+NewBackoff(min,max time.Duration) *Backoff
+NewBackoffNoJitter(min,max time.Duration) *Backoff
+
+NewRetry(*Executor) *Retry
+NewRetryWithBackoff(*Executor, *Backoff)
+
+func (*Retry) Retry(RetryFunc) *RetryFuture
+func (*Retry) RetryWithErrorHandler(RetryFunc, RetryErrorHandler) *RetryFuture
+
+func (*RetryFuture) Result() ValueError
 
 func (ValueError) Value() interface{}
 func (ValueError) Err()   error
