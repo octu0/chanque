@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/octu0/chanque)](https://goreportcard.com/report/github.com/octu0/chanque)
 [![Releases](https://img.shields.io/github/v/release/octu0/chanque)](https://github.com/octu0/chanque/releases)
 
-`chanque` provides a simple framework for asynchronous programming and goroutine management and safe use of channels.
+`chanque` provides simple framework for asynchronous programming and goroutine management and safe use of channel.
 
 ## Installation
 
@@ -21,11 +21,6 @@ Queue implementation.
 It provides blocking and non-blocking methods, as well as panic handling of channels.
 
 ```go
-import (
-	"fmt"
-	"github.com/octu0/chanque"
-)
-
 func main() {
 	que1 := chanque.NewQueue(10)
 	defer que1.Close()
@@ -59,12 +54,6 @@ which limits the number of concurrent executions of goroutines and creates gorou
 and can also be used as goroutine resource management.
 
 ```go
-import (
-	"fmt"
-	"time"
-	"github.com/octu0/chanque"
-)
-
 func main() {
 	// minWorker 1 maxWorker 2
 	exec := chanque.NewExecutor(1, 2)
@@ -117,13 +106,6 @@ Enqueue of parameter is blocked while WorkerHandler is running.
 There is also a BufferWorker implementation that non-blocking enqueue during asynchronous execution.
 
 ```go
-import (
-	"context"
-	"fmt"
-	"time"
-	"github.com/octu0/chanque"
-)
-
 func main() {
 	handler := func(param interface{}) {
 		if s, ok := param.(string); ok {
@@ -177,11 +159,6 @@ Parallel provides for executing in parallel and acquiring the execution result.
 extended implementation of Worker.
 
 ```go
-import (
-	"errors"
-	"github.com/octu0/chanque"
-)
-
 func main() {
 	executor := chanque.NewExecutor(10, 100)
 	defer executor.Release()
@@ -217,14 +194,8 @@ func main() {
 Retry provides function retry based on the exponential backoff algorithm.
 
 ```go
-import (
-	"context"
-	"fmt"
-	"github.com/octu0/chanque"
-)
-
 func main() {
-	retry := chanque.Retry(
+	retry := chanque.NewRetry(
 		chanque.RetryMax(10),
 		chanque.RetryBackoffIntervalMin(100*time.Millisecond),
 		chanque.RetryBackoffIntervalMax(30*time.Second),
@@ -253,13 +224,6 @@ Pipeline provides sequential asynchronous input and output.
 Execute func combination asynchronously
 
 ```go
-import (
-	"context"
-	"fmt"
-	"time"
-	"github.com/octu0/chanque"
-)
-
 func main() {
 	calcFn := func(parameter interface{}) (interface{}, error) {
 		// heavy process
@@ -293,11 +257,6 @@ Context/ContextTimeout provides a method for the waiting process
 Both apply and use a function that will be called when all operations are complete  
 
 ```go
-import (
-	"fmt"
-	"github.com/octu0/chanque"
-)
-
 func main() {
 	e := chanque.NewExecutor(1, 10)
 	defer e.Relase()
@@ -349,52 +308,6 @@ Loop provides safe termination of an infinite loop by goroutine.
 You can use callbacks with Queue and time.Ticker.  
 
 ```go
-//
-// old loop
-//
-func bar(ctx context.Context, queue chan string, done chan struct{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-
-		case v := <-queue:
-			println("queue=", v)
-
-		case <-done:
-			return
-		}
-	}
-}
-func foo(parent context.Context) {
-	ctx, cancel := context.WithTimeout(parent, 1*time.Second)
-	queue := make(chan string)
-	done := make(chan struct{})
-	go bar(ctx, queue, done)
-	go func() {
-		queue <- "hello1"
-		queue <- "hello2"
-		time.Sleep(1 * time.Second)
-		queue <- "world" // blocking! == no goroutine reader to queue
-	}()
-
-	go func() {
-		time.Sleep(1 * time.Second)
-		done <- struct{}{} // blocking! == no goroutine reader to done
-	}()
-
-	go func() {
-		select {
-		case <-time.After(10 * time.Second):
-			cancel()
-			return
-		}
-	}()
-}
-
-//
-// new loop
-//
 func newloop() {
 	e := NewExecutor(1, 10)
 
@@ -428,6 +341,26 @@ func newloop() {
 ## Documentation
 
 https://godoc.org/github.com/octu0/chanque
+
+# Benchmark
+
+## `go func()` vs `Executor`
+
+```bash
+$ go test -v -run=BenchmarkExecutor -bench=BenchmarkExecutor -benchmem  ./
+goos: darwin
+goarch: amd64
+pkg: github.com/octu0/chanque
+BenchmarkExecutor/goroutine-8         	 1000000	      2306 ns/op	     544 B/op	       2 allocs/op
+BenchmarkExecutor/executor/100-1000-8 	  952410	      1252 ns/op	      16 B/op	       1 allocs/op
+BenchmarkExecutor/executor/1000-5000-8    795402	      1327 ns/op	      18 B/op	       1 allocs/op
+--- BENCH: BenchmarkExecutor
+    executor_test.go:19: goroutine           	TotalAlloc=546437344	StackInUse=1996357632
+    executor_test.go:19: executor/100-1000   	TotalAlloc=25966144	StackInUse=-1993277440
+    executor_test.go:19: executor/1000-5000  	TotalAlloc=16092752	StackInUse=7012352
+PASS
+ok  	github.com/octu0/chanque	6.935s
+```
 
 ## Functions
 
