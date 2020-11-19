@@ -1,9 +1,80 @@
 package chanque
 
 import (
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
+
+func BenchmarkExecutor(b *testing.B) {
+	run := func(name string, fn func(*testing.B)) {
+		m1 := new(runtime.MemStats)
+		runtime.ReadMemStats(m1)
+
+		b.Run(name, fn)
+
+		m2 := new(runtime.MemStats)
+		runtime.ReadMemStats(m2)
+		b.Logf(
+			"%-20s\tTotalAlloc=%5d\tStackInUse=%5d",
+			name,
+			int64(m2.TotalAlloc)-int64(m1.TotalAlloc),
+			int64(m2.StackInuse)-int64(m1.StackInuse),
+			//int64(m2.HeapSys)  - int64(m1.HeapSys),
+			//int64(m2.HeapIdle)   - int64(m1.HeapIdle),
+		)
+	}
+	goroutine := func(size int) {
+		wg := new(sync.WaitGroup)
+		wg.Add(size)
+		for i := 0; i < size; i += 1 {
+			go func(w *sync.WaitGroup) {
+				defer w.Done()
+				time.Sleep(1 * time.Millisecond)
+			}(wg)
+		}
+		wg.Wait()
+	}
+	executor := func(size int, e *Executor) {
+		wg := new(sync.WaitGroup)
+		wg.Add(size)
+		for i := 0; i < size; i += 1 {
+			e.Submit(func(w *sync.WaitGroup) Job {
+				return func() {
+					defer w.Done()
+					time.Sleep(1 * time.Millisecond)
+				}
+			}(wg))
+		}
+		wg.Wait()
+	}
+	run("goroutine", func(tb *testing.B) {
+		goroutine(tb.N)
+	})
+	run("executor/100-1000", func(tb *testing.B) {
+		tb.StopTimer()
+		e := NewExecutor(100, 1000)
+		tb.StartTimer()
+
+		executor(tb.N, e)
+
+		tb.StopTimer()
+		e.Release()
+		tb.StartTimer()
+	})
+	run("executor/1000-5000", func(tb *testing.B) {
+		tb.StopTimer()
+		e := NewExecutor(1000, 5000)
+		tb.StartTimer()
+
+		executor(tb.N, e)
+
+		tb.StopTimer()
+		e.Release()
+		tb.StartTimer()
+	})
+}
 
 func TestExecutorDefault(t *testing.T) {
 	chkDefault := func(e *Executor) {
