@@ -138,6 +138,7 @@ func (w *defaultWorker) initWorker() {
 }
 
 func (w *defaultWorker) ForceStop() {
+	w.CloseEnqueue()
 	w.cancel()
 }
 
