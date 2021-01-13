@@ -299,82 +299,82 @@ func TestWorkerOptionExecutor(t *testing.T) {
 }
 
 func TestWorkerAbortQueueHandler(t *testing.T) {
-  t.Run("default", func(tt *testing.T) {
+	t.Run("default", func(tt *testing.T) {
 		e := NewExecutor(10, 10)
 		defer e.Release()
 
-    count := 0
-    dequeue := func(p interface{}) {
-      v := p.(int)
-      tt.Logf("dequeue val[%d] = %d", count, v)
-      if v != 123 {
-        tt.Errorf("first value is 123")
-      }
-      count += 1
-    }
-    abortHandler := func(p interface{}) {
-      v := p.(int)
-      tt.Logf("abort val[%d] = %d", count, v)
+		count := 0
+		dequeue := func(p interface{}) {
+			v := p.(int)
+			tt.Logf("dequeue val[%d] = %d", count, v)
+			if v != 123 {
+				tt.Errorf("first value is 123")
+			}
+			count += 1
+		}
+		abortHandler := func(p interface{}) {
+			v := p.(int)
+			tt.Logf("abort val[%d] = %d", count, v)
 
-      if count == 1 {
-        if v != 456 {
-          tt.Errorf("second value is 456")
-        }
-        count += 1
-      }
-      if count == 1 {
-        if v != 789 {
-          tt.Errorf("third value is 789")
-        }
-        count += 1
-      }
-    }
+			if count == 1 {
+				if v != 456 {
+					tt.Errorf("second value is 456")
+				}
+				count += 1
+			}
+			if count == 1 {
+				if v != 789 {
+					tt.Errorf("third value is 789")
+				}
+				count += 1
+			}
+		}
 
-    w := NewDefaultWorker(dequeue, WorkerExecutor(e), WorkerAbortQueueHandler(abortHandler))
+		w := NewDefaultWorker(dequeue, WorkerExecutor(e), WorkerAbortQueueHandler(abortHandler))
 
-    w.Enqueue(123)
-    w.Shutdown() // close enqueue
+		w.Enqueue(123)
+		w.Shutdown() // close enqueue
 
-    w.Enqueue(456)
-    w.Enqueue(789)
-  })
-  t.Run("buffer", func(tt *testing.T) {
+		w.Enqueue(456)
+		w.Enqueue(789)
+	})
+	t.Run("buffer", func(tt *testing.T) {
 		e := NewExecutor(10, 10)
 		defer e.Release()
 
-    count := 0
-    dequeue := func(p interface{}) {
-      v := p.(int)
-      tt.Logf("dequeue val[%d] = %d", count, v)
-      if v != 123 {
-        tt.Errorf("first value is 123")
-      }
-      count += 1
-    }
-    abortHandler := func(p interface{}) {
-      v := p.(int)
-      tt.Logf("abort val[%d] = %d", count, v)
+		count := 0
+		dequeue := func(p interface{}) {
+			v := p.(int)
+			tt.Logf("dequeue val[%d] = %d", count, v)
+			if v != 123 {
+				tt.Errorf("first value is 123")
+			}
+			count += 1
+		}
+		abortHandler := func(p interface{}) {
+			v := p.(int)
+			tt.Logf("abort val[%d] = %d", count, v)
 
-      if count == 1 {
-        if v != 456 {
-          tt.Errorf("second value is 456")
-        }
-        count += 1
-      }
-      if count == 1 {
-        if v != 789 {
-          tt.Errorf("third value is 789")
-        }
-        count += 1
-      }
-    }
+			if count == 1 {
+				if v != 456 {
+					tt.Errorf("second value is 456")
+				}
+				count += 1
+			}
+			if count == 1 {
+				if v != 789 {
+					tt.Errorf("third value is 789")
+				}
+				count += 1
+			}
+		}
 
-    w := NewBufferWorker(dequeue, WorkerExecutor(e), WorkerAbortQueueHandler(abortHandler))
+		w := NewBufferWorker(dequeue, WorkerExecutor(e), WorkerAbortQueueHandler(abortHandler))
 
-    w.Enqueue(123)
-    w.ShutdownAndWait() // close enqueue
+		w.Enqueue(123)
+		w.ShutdownAndWait() // close enqueue
 
-    w.Enqueue(456)
-    w.Enqueue(789)
-  })
+		w.Enqueue(456)
+		w.Enqueue(789)
+	})
 }
