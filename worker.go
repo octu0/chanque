@@ -266,8 +266,9 @@ func (w *bufferWorker) Shutdown() {
 }
 
 func (w *bufferWorker) ShutdownAndWait() {
-	w.CloseEnqueue()
-	w.subexec.Wait()
+	if w.CloseEnqueue() {
+		w.subexec.Wait()
+	}
 }
 
 func (w *bufferWorker) CloseEnqueue() bool {

@@ -139,17 +139,9 @@ func (p *Pipeline) Shutdown() {
 }
 
 func (p *Pipeline) ShutdownAndWait() {
-	if p.parameters.CloseEnqueue() {
-		p.parameters.ShutdownAndWait()
-	}
-	if p.inWorker.CloseEnqueue() {
-		p.inWorker.ShutdownAndWait()
-	}
-	if p.outWorker.CloseEnqueue() {
-		p.outWorker.ShutdownAndWait()
-	}
-	if p.doneWorker.CloseEnqueue() {
-		p.doneWorker.ShutdownAndWait()
-	}
+	p.parameters.ShutdownAndWait()
+	p.inWorker.ShutdownAndWait()
+	p.outWorker.ShutdownAndWait()
+	p.doneWorker.ShutdownAndWait()
 	p.done.Wait()
 }
