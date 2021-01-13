@@ -309,21 +309,25 @@ func (w *bufferWorker) exec(parameters []interface{}, done func()) {
 	w.opt.postHook()
 }
 
+func (w *bufferWorker) submitBuffer(parameters []interface{}, done func()) {
+	w.subexec.Submit(func() {
+		w.exec(parameters, done)
+	})
+}
+
 func (w *bufferWorker) runloop() {
-	genExec := func(q []interface{}, done func()) Job {
-		return func() {
-			w.exec(q, done)
-		}
-	}
 	running := int32(0)
 
 	buffer := make([]interface{}, 0)
 	defer func() {
 		if 0 < len(buffer) {
-			w.subexec.Submit(genExec(buffer, bufferExecNoopDone))
+			w.submitBuffer(buffer, bufferExecNoopDone)
 		}
 		w.cancel() // ensure release
 	}()
+
+	deq := NewQueue(1, QueuePanicHandler(noopPanicHandler))
+	defer deq.Close()
 
 	for {
 		select {
@@ -335,8 +339,9 @@ func (w *bufferWorker) runloop() {
 				return
 			}
 			buffer = append(buffer, param)
+			deq.EnqueueNB(struct{}{})
 
-		default:
+		case <-deq.Chan():
 			if len(buffer) < 1 {
 				continue
 			}
@@ -349,9 +354,10 @@ func (w *bufferWorker) runloop() {
 			copy(queue, buffer)
 			buffer = buffer[len(buffer):]
 
-			w.subexec.Submit(genExec(queue, func() {
+			w.submitBuffer(queue, func() {
 				atomic.StoreInt32(&running, 0)
-			}))
+				deq.EnqueueNB(struct{}{}) // dequeue remain buffer
+			})
 		}
 	}
 }
