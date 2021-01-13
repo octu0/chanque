@@ -72,15 +72,13 @@ const (
 )
 
 type defaultWorker struct {
-	queue        *Queue
-	handler      WorkerHandler
-	closed       int32
-	ctx          context.Context
-	cancel       context.CancelFunc
-	panicHandler PanicHandler
-	preHook      WorkerHook
-	postHook     WorkerHook
-	subexec      *SubExecutor
+	opt     *optWorker
+	queue   *Queue
+	handler WorkerHandler
+	closed  int32
+	ctx     context.Context
+	cancel  context.CancelFunc
+	subexec *SubExecutor
 }
 
 // run background
@@ -106,17 +104,15 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	}
 
 	ctx, cancel := context.WithCancel(opt.ctx)
-	w := new(defaultWorker)
-	w.queue = NewQueue(0, QueuePanicHandler(opt.panicHandler))
-	w.handler = handler
-	w.closed = workerEnqueueInit
-	w.ctx = ctx
-	w.cancel = cancel
-	w.panicHandler = opt.panicHandler
-	w.preHook = opt.preHook
-	w.postHook = opt.postHook
-	w.subexec = opt.executor.SubExecutor()
-
+	w := &defaultWorker{
+		opt:     opt,
+		queue:   NewQueue(0, QueuePanicHandler(opt.panicHandler)),
+		handler: handler,
+		closed:  workerEnqueueInit,
+		ctx:     ctx,
+		cancel:  cancel,
+		subexec: opt.executor.SubExecutor(),
+	}
 	w.initWorker()
 	return w
 }
@@ -167,9 +163,9 @@ func (w *defaultWorker) runloop() {
 				return
 			}
 
-			w.preHook()
+			w.opt.preHook()
 			w.handler(param)
-			w.postHook()
+			w.opt.postHook()
 		}
 	}
 }
@@ -184,7 +180,7 @@ func bufferExecNoopDone() {
 }
 
 type bufferWorker struct {
-	defaultWorker
+	*defaultWorker
 	chkqueue *Queue
 }
 
@@ -210,17 +206,18 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	}
 
 	ctx, cancel := context.WithCancel(opt.ctx)
-	w := new(bufferWorker)
-	w.queue = NewQueue(0, QueuePanicHandler(opt.panicHandler))
-	w.handler = handler
-	w.closed = workerEnqueueInit
-	w.ctx = ctx
-	w.cancel = cancel
-	w.panicHandler = opt.panicHandler
-	w.preHook = opt.preHook
-	w.postHook = opt.postHook
-	w.subexec = opt.executor.SubExecutor()
-	w.chkqueue = NewQueue(1, QueuePanicHandler(noopPanicHandler))
+	w := &bufferWorker{
+		defaultWorker: &defaultWorker{
+			opt:     opt,
+			queue:   NewQueue(0, QueuePanicHandler(opt.panicHandler)),
+			handler: handler,
+			closed:  workerEnqueueInit,
+			ctx:     ctx,
+			cancel:  cancel,
+			subexec: opt.executor.SubExecutor(),
+		},
+		chkqueue: NewQueue(1, QueuePanicHandler(noopPanicHandler)),
+	}
 
 	w.initWorker()
 	return w
@@ -266,11 +263,11 @@ func (w *bufferWorker) Enqueue(param interface{}) bool {
 func (w *bufferWorker) exec(parameters []interface{}, done func()) {
 	defer done()
 
-	w.preHook()
+	w.opt.preHook()
 	for _, param := range parameters {
 		w.handler(param)
 	}
-	w.postHook()
+	w.opt.postHook()
 }
 
 func (w *bufferWorker) runloop() {
