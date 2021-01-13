@@ -21,14 +21,21 @@ func noopWorkerHook() {
 	/* noop */
 }
 
+type WorkerAbortQueueHandlerFunc func(paramter interface{})
+
+func noopAbortQueueHandler(interface{}) {
+	/* noop */
+}
+
 type WorkerOptionFunc func(*optWorker)
 
 type optWorker struct {
-	ctx          context.Context
-	panicHandler PanicHandler
-	preHook      WorkerHook
-	postHook     WorkerHook
-	executor     *Executor
+	ctx               context.Context
+	panicHandler      PanicHandler
+	preHook           WorkerHook
+	postHook          WorkerHook
+	abortQueueHandler WorkerAbortQueueHandlerFunc
+	executor          *Executor
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -52,6 +59,12 @@ func WorkerPreHook(hook WorkerHook) WorkerOptionFunc {
 func WorkerPostHook(hook WorkerHook) WorkerOptionFunc {
 	return func(opt *optWorker) {
 		opt.postHook = hook
+	}
+}
+
+func WorkerAbortQueueHandler(handler WorkerAbortQueueHandlerFunc) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.abortQueueHandler = handler
 	}
 }
 
@@ -98,6 +111,9 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	}
 	if opt.postHook == nil {
 		opt.postHook = noopWorkerHook
+	}
+	if opt.abortQueueHandler == nil {
+		opt.abortQueueHandler = noopAbortQueueHandler
 	}
 	if opt.executor == nil {
 		opt.executor = NewExecutor(1, 1)
@@ -147,12 +163,23 @@ func (w *defaultWorker) tryQueueClose() bool {
 	return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
 }
 
+func (w *defaultWorker) isClosed() bool {
+	return atomic.LoadInt32(&w.closed) == workerEnqueueClosed
+}
+
 // enqueue parameter w/ blocking until handler running
 func (w *defaultWorker) Enqueue(param interface{}) bool {
+	if w.isClosed() {
+		// collect queue that queue closed
+		w.opt.abortQueueHandler(param)
+		return false
+	}
 	return w.queue.Enqueue(param)
 }
 
 func (w *defaultWorker) runloop() {
+	defer w.cancel() // ensure release
+
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -181,7 +208,6 @@ func bufferExecNoopDone() {
 
 type bufferWorker struct {
 	*defaultWorker
-	chkqueue *Queue
 }
 
 func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
@@ -201,6 +227,9 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	if opt.postHook == nil {
 		opt.postHook = noopWorkerHook
 	}
+	if opt.abortQueueHandler == nil {
+		opt.abortQueueHandler = noopAbortQueueHandler
+	}
 	if opt.executor == nil {
 		opt.executor = NewExecutor(2, 2) // checker + dequeue
 	}
@@ -216,7 +245,6 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 			cancel:  cancel,
 			subexec: opt.executor.SubExecutor(),
 		},
-		chkqueue: NewQueue(1, QueuePanicHandler(noopPanicHandler)),
 	}
 
 	w.initWorker()
@@ -254,8 +282,17 @@ func (w *bufferWorker) tryQueueClose() bool {
 	return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
 }
 
+func (w *bufferWorker) isClosed() bool {
+	return atomic.LoadInt32(&w.closed) == workerEnqueueClosed
+}
+
 // enqueue parameter w/ non-blocking until capacity
 func (w *bufferWorker) Enqueue(param interface{}) bool {
+	if w.isClosed() {
+		// collect queue that queue closed
+		w.opt.abortQueueHandler(param)
+		return false
+	}
 	return w.queue.Enqueue(param)
 }
 
@@ -271,14 +308,6 @@ func (w *bufferWorker) exec(parameters []interface{}, done func()) {
 }
 
 func (w *bufferWorker) runloop() {
-	defer w.chkqueue.Close()
-
-	check := func(c *Queue) Job {
-		return func() {
-			c.EnqueueNB(struct{}{})
-		}
-	}(w.chkqueue)
-
 	genExec := func(q []interface{}, done func()) Job {
 		return func() {
 			w.exec(q, done)
@@ -287,12 +316,25 @@ func (w *bufferWorker) runloop() {
 	running := int32(0)
 
 	buffer := make([]interface{}, 0)
+	defer func() {
+		if 0 < len(buffer) {
+			w.subexec.Submit(genExec(buffer, bufferExecNoopDone))
+		}
+		w.cancel() // ensure release
+	}()
+
 	for {
 		select {
 		case <-w.ctx.Done():
 			return
 
-		case <-w.chkqueue.Chan():
+		case param, ok := <-w.queue.Chan():
+			if ok != true {
+				return
+			}
+			buffer = append(buffer, param)
+
+		default:
 			if len(buffer) < 1 {
 				continue
 			}
@@ -304,21 +346,10 @@ func (w *bufferWorker) runloop() {
 			queue := make([]interface{}, len(buffer))
 			copy(queue, buffer)
 			buffer = buffer[len(buffer):]
+
 			w.subexec.Submit(genExec(queue, func() {
 				atomic.StoreInt32(&running, 0)
-				check()
 			}))
-
-		case param, ok := <-w.queue.Chan():
-			if ok != true {
-				if 0 < len(buffer) {
-					w.subexec.Submit(genExec(buffer, bufferExecNoopDone))
-				}
-				return
-			}
-
-			buffer = append(buffer, param)
-			w.subexec.Submit(check)
 		}
 	}
 }
