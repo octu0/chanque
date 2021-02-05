@@ -65,6 +65,22 @@ func TestWorkerSequence(t *testing.T) {
 			return NewBufferWorker(h, WorkerExecutor(e))
 		})
 	})
+	t.Run("default/cap5/executor10/10", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		checkSeq(tt, func(h WorkerHandler) Worker {
+			return NewDefaultWorker(h, WorkerExecutor(e), WorkerCapacity(5))
+		})
+	})
+	t.Run("buffer/cap5/executor10/10", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		checkSeq(tt, func(h WorkerHandler) Worker {
+			return NewBufferWorker(h, WorkerExecutor(e), WorkerCapacity(5))
+		})
+	})
 }
 
 func TestWorkerPrePostHook(t *testing.T) {
@@ -376,5 +392,135 @@ func TestWorkerAbortQueueHandler(t *testing.T) {
 
 		w.Enqueue(456)
 		w.Enqueue(789)
+	})
+}
+
+func TestWorkerCapacity(t *testing.T) {
+	t.Run("default/cap0", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		times := 5
+		delay := 100 * time.Millisecond
+		dequeue := func(p interface{}) {
+			<-time.After(delay)
+			tt.Logf("dequeue %d", p.(int))
+		}
+		w := NewDefaultWorker(dequeue, WorkerExecutor(e))
+
+		s := time.Now()
+		for i := 0; i <= times; i += 1 {
+			k := time.Now()
+			w.Enqueue(i)
+			tt.Logf("%d: e = %s", i, time.Since(k))
+		}
+
+		elapse := time.Since(s)
+		if (time.Duration(times-1) * delay) <= elapse {
+			tt.Logf("capacity 0 is blocking >=400ms: %s", elapse)
+		} else {
+			tt.Errorf("must block queue: %s", elapse)
+		}
+	})
+
+	t.Run("default/cap5", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		times := 5
+		delay := 100 * time.Millisecond
+		dequeue := func(p interface{}) {
+			<-time.After(delay)
+			tt.Logf("dequeue %d", p.(int))
+		}
+		w := NewDefaultWorker(dequeue, WorkerExecutor(e), WorkerCapacity(5))
+
+		s := time.Now()
+		for i := 0; i <= times; i += 1 {
+			k := time.Now()
+			w.Enqueue(i)
+			tt.Logf("%d: e = %s", i, time.Since(k))
+		}
+
+		elapse := time.Since(s)
+		if elapse < delay {
+			tt.Logf("non blocking until 5 times %s", elapse)
+		} else {
+			tt.Errorf("must non blocking queue: %s", elapse)
+		}
+
+		s2 := time.Now()
+		w.Enqueue(struct{}{})
+		elapse2 := time.Since(s2)
+
+		if delay <= elapse2 {
+			tt.Logf("must blocking over 5 times: %s", elapse2)
+		} else {
+			tt.Errorf("must blocking greater than eq 5 cap: %s", elapse2)
+		}
+	})
+
+	t.Run("buffer/cap0", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		times := 5
+		delay := 100 * time.Millisecond
+		dequeue := func(p interface{}) {
+			<-time.After(delay)
+			tt.Logf("dequeue %d", p.(int))
+		}
+		w := NewBufferWorker(dequeue, WorkerExecutor(e))
+
+		s := time.Now()
+		for i := 0; i <= times; i += 1 {
+			k := time.Now()
+			w.Enqueue(i)
+			tt.Logf("%d: e = %s", i, time.Since(k))
+		}
+
+		elapse := time.Since(s)
+		if elapse < delay {
+			tt.Logf("buffer worker non blocking worker execution: %s", elapse)
+		} else {
+			tt.Errorf("buffer worker blocking(maybe small goroutine size: %s", elapse)
+		}
+	})
+
+	t.Run("buffer/cap5", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		times := 5
+		delay := 100 * time.Millisecond
+		dequeue := func(p interface{}) {
+			<-time.After(delay)
+			tt.Logf("dequeue %d", p.(int))
+		}
+		w := NewBufferWorker(dequeue, WorkerExecutor(e), WorkerCapacity(5))
+
+		s := time.Now()
+		for i := 0; i <= times; i += 1 {
+			k := time.Now()
+			w.Enqueue(i)
+			tt.Logf("%d: e = %s", i, time.Since(k))
+		}
+
+		elapse := time.Since(s)
+		if elapse < delay {
+			tt.Logf("non blocking buffer worker %s", elapse)
+		} else {
+			tt.Errorf("must non blocking queue: %s", elapse)
+		}
+
+		s2 := time.Now()
+		w.Enqueue(struct{}{})
+		elapse2 := time.Since(s2)
+
+		if elapse2 < delay {
+			tt.Logf("buffer worker non blocking worker execution: %s", elapse)
+		} else {
+			tt.Errorf("buffer worker blocking(maybe small goroutine size: %s", elapse)
+		}
 	})
 }

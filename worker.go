@@ -36,6 +36,7 @@ type optWorker struct {
 	postHook          WorkerHook
 	abortQueueHandler WorkerAbortQueueHandlerFunc
 	executor          *Executor
+	capacity          int
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -71,6 +72,12 @@ func WorkerAbortQueueHandler(handler WorkerAbortQueueHandlerFunc) WorkerOptionFu
 func WorkerExecutor(executor *Executor) WorkerOptionFunc {
 	return func(opt *optWorker) {
 		opt.executor = executor
+	}
+}
+
+func WorkerCapacity(capacity int) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.capacity = capacity
 	}
 }
 
@@ -118,11 +125,14 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	if opt.executor == nil {
 		opt.executor = NewExecutor(1, 1)
 	}
+	if opt.capacity < 1 {
+		opt.capacity = 0
+	}
 
 	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &defaultWorker{
 		opt:     opt,
-		queue:   NewQueue(0, QueuePanicHandler(opt.panicHandler)),
+		queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 		handler: handler,
 		closed:  workerEnqueueInit,
 		ctx:     ctx,
@@ -234,12 +244,15 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	if opt.executor == nil {
 		opt.executor = NewExecutor(2, 2) // checker + dequeue
 	}
+	if opt.capacity < 1 {
+		opt.capacity = 0
+	}
 
 	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &bufferWorker{
 		defaultWorker: &defaultWorker{
 			opt:     opt,
-			queue:   NewQueue(0, QueuePanicHandler(opt.panicHandler)),
+			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 			handler: handler,
 			closed:  workerEnqueueInit,
 			ctx:     ctx,
