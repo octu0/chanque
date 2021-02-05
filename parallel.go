@@ -87,12 +87,14 @@ func newParallelFutureResult() *ParallelFutureResult {
 		results: make([]ValueError, 0),
 	}
 }
+
 func (r *ParallelFutureResult) add(re ValueError) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	r.results = append(r.results, re)
 }
+
 func (r *ParallelFutureResult) Results() []ValueError {
 	return r.results
 }

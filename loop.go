@@ -72,8 +72,8 @@ func (m *loopMux) selectTickQueueDefault(ctx context.Context) LoopNext {
 	default:
 		return m.defaultHandler()
 	}
-
 }
+
 func (m *loopMux) selectTickQueue(ctx context.Context) LoopNext {
 	select {
 	case <-ctx.Done():
@@ -99,6 +99,7 @@ func (m *loopMux) selectTickerDefault(ctx context.Context) LoopNext {
 		return m.defaultHandler()
 	}
 }
+
 func (m *loopMux) selectTicker(ctx context.Context) LoopNext {
 	select {
 	case <-ctx.Done():
@@ -197,13 +198,13 @@ func NewLoop(e *Executor, funcs ...LoopOptionFunc) *Loop {
 		opt.ctx = context.Background()
 	}
 
-	lo := new(Loop)
-	lo.mutex = new(sync.Mutex)
-	lo.ctx = opt.ctx
-	lo.cancel = nil
-	lo.exec = e.SubExecutor()
-	lo.mux = new(loopMux)
-	return lo
+	return &Loop{
+		mutex:  new(sync.Mutex),
+		ctx:    opt.ctx,
+		cancel: nil,
+		exec:   e.SubExecutor(),
+		mux:    new(loopMux),
+	}
 }
 
 func (lo *Loop) Stop() {
@@ -214,6 +215,7 @@ func (lo *Loop) Stop() {
 		lo.cancel()
 	}
 }
+
 func (lo *Loop) StopAndWait() {
 	lo.Stop()
 	lo.exec.Wait()
