@@ -23,16 +23,19 @@ func ExecutorPanicHandler(handler PanicHandler) ExecutorOptionFunc {
 		opt.panicHandler = handler
 	}
 }
+
 func ExecutorReducderInterval(interval time.Duration) ExecutorOptionFunc {
 	return func(opt *optExecutor) {
 		opt.reducerInterval = interval
 	}
 }
+
 func ExecutorMaxCapacity(capacity int) ExecutorOptionFunc {
 	return func(opt *optExecutor) {
 		opt.maxCapacity = capacity
 	}
 }
+
 func ExecutorContext(ctx context.Context) ExecutorOptionFunc {
 	return func(opt *optExecutor) {
 		opt.ctx = ctx
@@ -87,19 +90,20 @@ func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executo
 		opt.ctx = context.Background()
 	}
 
-	e := new(Executor)
-	e.mutex = new(sync.Mutex)
-	e.wg = new(sync.WaitGroup)
-	e.jobs = NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler))
-	e.ctx = opt.ctx
-	e.jobCancel = make([]context.CancelFunc, 0)
-	e.healthCancel = nil
-	e.minWorker = minWorker
-	e.maxWorker = maxWorker
-	e.panicHandler = opt.panicHandler
-	e.reducerInterval = opt.reducerInterval
-	e.runningNum = int32(0)
-	e.workerNum = int32(0)
+	e := &Executor{
+		mutex:           new(sync.Mutex),
+		wg:              new(sync.WaitGroup),
+		jobs:            NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler)),
+		ctx:             opt.ctx,
+		jobCancel:       make([]context.CancelFunc, 0),
+		healthCancel:    nil,
+		minWorker:       minWorker,
+		maxWorker:       maxWorker,
+		panicHandler:    opt.panicHandler,
+		reducerInterval: opt.reducerInterval,
+		runningNum:      int32(0),
+		workerNum:       int32(0),
+	}
 
 	e.initWorker()
 	return e
@@ -346,14 +350,14 @@ func (e *Executor) SubExecutor() *SubExecutor {
 }
 
 type SubExecutor struct {
-	parent *Executor
 	wg     *sync.WaitGroup
+	parent *Executor
 }
 
 func newSubExecutor(parent *Executor) *SubExecutor {
 	return &SubExecutor{
-		parent: parent,
 		wg:     new(sync.WaitGroup),
+		parent: parent,
 	}
 }
 

@@ -31,10 +31,10 @@ func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
 		opt.panicHandler = defaultPanicHandler
 	}
 
-	q := new(Queue)
-	q.ch = make(chan interface{}, c)
-	q.panicHandler = opt.panicHandler
-	return q
+	return &Queue{
+		ch:           make(chan interface{}, c),
+		panicHandler: opt.panicHandler,
+	}
 }
 
 func (q *Queue) Len() int {

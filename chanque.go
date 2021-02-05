@@ -30,6 +30,7 @@ type PanicHandler func(PanicType, interface{})
 func defaultPanicHandler(pt PanicType, rcv interface{}) {
 	log.Printf("error: [recover] panic(%s) occurred %v stack %s", pt, rcv, string(debug.Stack()))
 }
+
 func noopPanicHandler(PanicType, interface{}) {
 	/* noop */
 }
@@ -47,6 +48,7 @@ type tupleValueError struct {
 func (r *tupleValueError) Value() interface{} {
 	return r.value
 }
+
 func (r *tupleValueError) Err() error {
 	return r.err
 }

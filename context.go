@@ -14,11 +14,11 @@ type Context struct {
 }
 
 func NewContext(executor *Executor, done DoneFunc) *Context {
-	c := new(Context)
-	c.waits = executor.SubExecutor()
-	c.bg = executor.SubExecutor()
-	c.done = done
-	return c
+	return &Context{
+		waits: executor.SubExecutor(),
+		bg:    executor.SubExecutor(),
+		done:  done,
+	}
 }
 
 func (c *Context) createWriteDone(done chan struct{}) func() {
@@ -61,26 +61,29 @@ type ContextTimeout struct {
 func NewContextTimeout(executor *Executor, done DoneFunc, timeout time.Duration) *ContextTimeout {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
-	c := new(ContextTimeout)
-	c.ctx = ctx
-	c.cancel = cancel
-	c.timeout = timeout
-	c.waits = executor.SubExecutor()
-	c.bg = executor.SubExecutor()
-	c.done = done
-	return c
+	return &ContextTimeout{
+		ctx:     ctx,
+		cancel:  cancel,
+		timeout: timeout,
+		waits:   executor.SubExecutor(),
+		bg:      executor.SubExecutor(),
+		done:    done,
+	}
 }
+
 func (c *ContextTimeout) createWaitContextDone(ctx context.Context, cancel context.CancelFunc) Job {
 	return func() {
 		defer cancel()
 		<-ctx.Done()
 	}
 }
+
 func (c *ContextTimeout) Add() func() {
 	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
 	c.waits.Submit(c.createWaitContextDone(ctx, cancel))
 	return cancel
 }
+
 func (c *ContextTimeout) Wait() {
 	defer c.cancel()
 
@@ -88,6 +91,7 @@ func (c *ContextTimeout) Wait() {
 	<-c.ctx.Done()
 	c.done()
 }
+
 func (c *ContextTimeout) Background() {
 	c.bg.Submit(c.Wait)
 }

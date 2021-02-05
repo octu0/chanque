@@ -1,5 +1,5 @@
 package chanque
 
 const (
-	Version string = "1.0.14"
+	Version string = "1.0.15"
 )
