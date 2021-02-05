@@ -244,15 +244,15 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	if opt.executor == nil {
 		opt.executor = NewExecutor(2, 2) // checker + dequeue
 	}
-	if opt.capacity < 1 {
-		opt.capacity = 0
+	if 0 < opt.capacity {
+		// buffer worker ignore capacity
 	}
 
 	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &bufferWorker{
 		defaultWorker: &defaultWorker{
 			opt:     opt,
-			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
+			queue:   NewQueue(0, QueuePanicHandler(opt.panicHandler)),
 			handler: handler,
 			closed:  workerEnqueueInit,
 			ctx:     ctx,
