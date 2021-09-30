@@ -2,13 +2,8 @@ package chanque
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"time"
-)
-
-var (
-	ErrWaitingTimeout = errors.New("Waiting timeout")
 )
 
 type Wait struct {
@@ -26,28 +21,13 @@ func (w *Wait) Cancel() {
 }
 
 func (w *Wait) Wait() error {
-	return w.WaitTimeout(-1)
-}
-
-func (w *Wait) WaitTimeout(dur time.Duration) error {
-	if dur < 0 {
-		select {
-		case <-w.ctx.Done():
-			return w.ctx.Err()
-		case <-w.waitCh:
-			return nil
-		}
-		return nil
-	}
-
 	select {
-	case <-time.After(dur):
-		return ErrWaitingTimeout
 	case <-w.ctx.Done():
 		return w.ctx.Err()
 	case <-w.waitCh:
 		return nil
 	}
+	return nil
 }
 
 func (w *Wait) close() {
@@ -112,31 +92,8 @@ func (w *WaitSequence) Cancel() {
 }
 
 func (w *WaitSequence) Wait() error {
-	return w.WaitTimeout(-1)
-}
-
-func (w *WaitSequence) WaitTimeout(dur time.Duration) error {
-	if dur < 0 {
-		for _, child := range w.wn {
-			select {
-			case <-w.ctx.Done():
-				// main *Wait.Wait
-				return w.ctx.Err()
-			case <-child.ctx.Done():
-				// child *Wait.Wait
-				return child.ctx.Err()
-			case <-child.waitCh:
-				// nop. child success Done
-			}
-		}
-		return nil
-	}
-
-	after := time.After(dur)
 	for _, child := range w.wn {
 		select {
-		case <-after:
-			return ErrWaitingTimeout
 		case <-w.ctx.Done():
 			// main *Wait.Wait
 			return w.ctx.Err()
@@ -225,11 +182,11 @@ func newRendezvousWithContextCancel(ctx context.Context, cancel context.CancelFu
 	}
 }
 
-func Rendezvous(n int) *WaitRendezvous {
+func WaitRendez(n int) *WaitRendezvous {
 	return newRendezvous(context.Background(), n)
 }
 
-func RendezvousTimeout(dur time.Duration, n int) *WaitRendezvous {
+func WaitRendezTimeout(dur time.Duration, n int) *WaitRendezvous {
 	return newRendezvousWithTimeout(context.Background(), dur, n)
 }
 
@@ -287,7 +244,7 @@ func WaitReqTimeout(dur time.Duration) *WaitRequest {
 	return newWaitRequestWithTimeout(context.Background(), dur)
 }
 
-type ReplyFunc func(interface{}) (interface{}, error)
+type WaitReplyFunc func(interface{}) (interface{}, error)
 
 type WaitRequestReply struct {
 	ctx      context.Context
@@ -303,6 +260,10 @@ type reqreplyRequest struct {
 type reqreplyReply struct {
 	value interface{}
 	err   error
+}
+
+func (r *WaitRequestReply) Cancel() {
+	r.cancel()
 }
 
 func (r *WaitRequestReply) Req(v interface{}) (interface{}, error) {
@@ -332,7 +293,7 @@ func (r *WaitRequestReply) Req(v interface{}) (interface{}, error) {
 	}
 }
 
-func (r *WaitRequestReply) Reply(fn ReplyFunc) error {
+func (r *WaitRequestReply) Reply(fn WaitReplyFunc) error {
 	// recv req
 	select {
 	case <-r.ctx.Done():
