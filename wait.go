@@ -112,8 +112,31 @@ func (w *WaitSequence) Cancel() {
 }
 
 func (w *WaitSequence) Wait() error {
+	return w.WaitTimeout(-1)
+}
+
+func (w *WaitSequence) WaitTimeout(dur time.Duration) error {
+	if dur < 0 {
+		for _, child := range w.wn {
+			select {
+			case <-w.ctx.Done():
+				// main *Wait.Wait
+				return w.ctx.Err()
+			case <-child.ctx.Done():
+				// child *Wait.Wait
+				return child.ctx.Err()
+			case <-child.waitCh:
+				// nop. child success Done
+			}
+		}
+		return nil
+	}
+
+	after := time.After(dur)
 	for _, child := range w.wn {
 		select {
+		case <-after:
+			return ErrWaitingTimeout
 		case <-w.ctx.Done():
 			// main *Wait.Wait
 			return w.ctx.Err()
