@@ -218,87 +218,111 @@ func main() {
 }
 ```
 
-### Pipeline
+### Wait
 
-Pipeline provides sequential asynchronous input and output.
-Execute func combination asynchronously
+Wait provides wait handling like sync.WaitGroup and context.Done.  
+Provides implementations for patterns that run concurrently, wait for multiple processes, wait for responses, and many other use cases.
 
 ```go
-func main() {
-	calcFn := func(parameter interface{}) (interface{}, error) {
-		// heavy process
-		time.Sleep(1 * time.Second)
+func one() {
+	w := WaitOne()
+	defer w.Cancel()
 
-		if val, ok := parameter.(int); ok {
-			return val * 2, nil
-		}
-		return -1, fmt.Errorf("invalid parameter")
+	go func(w *Wait) {
+		defer w.Done()
+
+		fmt.Println("heavy process")
+	}(w)
+
+	w.Wait()
+}
+
+func any() {
+	w := WaitN(10)
+	defer w.Cancel()
+
+	for i := 0; i < 10; i += 1 {
+		go func(w *Wait) {
+			defer w.Done()
+
+			fmt.Println("N proc")
+		}(w)
 	}
-	outFn := func(result interface{}, err error) {
-		if err != nil {
-			fmt.Fatal(err)
+	w.Wait()
+}
+
+func sequencial() {
+	w1, := WaitOne()
+	defer w1.Cancel()
+	go Preprocess(w1)
+
+	w2 := WaitOne()
+	defer w2.Cancel()
+	go Preprocess(w2)
+
+	ws := WaitSeq(w1, w2)
+	defer ws.Cancel()
+
+	// Wait for A.Done() -> B.Done() -> ... N.Done() ordered
+	ws.Wait()
+}
+
+func rendezvous() {
+	wr := WaitRendez(2)
+	defer wr.Cancel()
+
+	go func() {
+		if err := wr.Wait(); err != nil {
+			fmt.Println("timeout or cancel")
 			return
 		}
-
-		fmt.Println("value =", parameter.(int))
-	}
-
-	pipe := chanque.NewPipeline(calcFn, outFn)
-	pipe.Enqueue(10)
-	pipe.Enqueue(20)
-	pipe.Enqueue(30)
-	pipe.ShutdownAndWait()
+		fmt.Println("run sync")
+	}()
+	go func() {
+		if err := wr.Wait(); err != nil {
+			fmt.Println("timeout or cancel")
+			return
+		}
+		fmt.Println("run sync")
+	}()
 }
-```
 
-### Context / ContextTimeout
+func req() {
+	wreq := WaitReq()
+	defer wreq.Cancel()
 
-Context/ContextTimeout provides a method for the waiting process  
-Both apply and use a function that will be called when all operations are complete  
+	go func() {
+		if err := wreq.Req("hello world"); err != nil {
+			fmt.Println("timeout or cancel")
+		}
+		fmt.Println("send req")
+	}()
 
-```go
-func main() {
-	e := chanque.NewExecutor(1, 10)
-	defer e.Relase()
-
-	heavyProcessA := func(done chanque.DoneFunc) {
-		defer done()
-		time.Sleep(1 * time.Second) // heavy process
+	v, err := wreq.Wait()
+	if err != nil {
+		fmt.Println("timeout or cancel")
 	}
-	heavyProcessB := func(done chanque.DoneFunc) {
-		defer done()
-		time.Sleep(5 * time.Second) // heavy process
-	}
+	fmt.Println(v.(string)) // => "hello world"
+}
 
-	ctx := chanque.NewContext(e, func() {
-		fmt.Printf("all done")
-	})
-
-	go func(d chanque.DoneFunc) {
-		heavyProcessA(d)
-	}(ctx.Add())
-
-	go func(d chanque.DoneFunc) {
-		heavyProcessB(d)
-	}(ctx.Add())
-
-	ctx.Wait()
-
-	// ContextTimeout is used to execute
-	// a process without waiting for each operation to complete.
-	ctxTO := chanque.NewContextTimeout(e, func() {
-		fmt.Printf("all done w/o sub process done")
-	}, 1*time.Second)
-
-	go func(d chanque.DoneFunc) {
-		heavyProcessA(d)
-	}(ctxTO.Add())
-
-	go func(d chanque.DoneFunc) {
-		heavyProcessB(d)
-	}(ctxTO.Add())
-
-	ctxTO.Background()
+func reqreply() {
+	wrr := WaitReqReply()
+	go func() {
+		v, err := wrr.Req("hello")
+		if err != nil {
+			fmt.Println("timeout or cancel")
+		}
+		fmt.Println(v.(string)) // => "hello world2"
+	}()
+	go func() {
+		err := wrr.Reply(func(v interface{}) (interface{}, err) {
+			s := v.(string)
+			return s + " world2", nil
+		})
+		if err != nil {
+			fmt.Println("timeout or cancel")
+		}
+	}()
 }
 ```
 
@@ -338,6 +362,39 @@ func newloop() {
 }
 ```
 
+### Pipeline
+
+Pipeline provides sequential asynchronous input and output.
+Execute func combination asynchronously
+
+```go
+func main() {
+	calcFn := func(parameter interface{}) (interface{}, error) {
+		// heavy process
+		time.Sleep(1 * time.Second)
+
+		if val, ok := parameter.(int); ok {
+			return val * 2, nil
+		}
+		return -1, fmt.Errorf("invalid parameter")
+	}
+	outFn := func(result interface{}, err error) {
+		if err != nil {
+			fmt.Fatal(err)
+			return
+		}
+
+		fmt.Println("value =", parameter.(int))
+	}
+
+	pipe := chanque.NewPipeline(calcFn, outFn)
+	pipe.Enqueue(10)
+	pipe.Enqueue(20)
+	pipe.Enqueue(30)
+	pipe.ShutdownAndWait()
+}
+```
+
 ## Documentation
 
 https://godoc.org/github.com/octu0/chanque
@@ -360,148 +417,6 @@ BenchmarkExecutor/executor/1000-5000-8    795402	      1327 ns/op	      18 B/op	
     executor_test.go:19: executor/1000-5000  	TotalAlloc=16092752	StackInUse=7012352
 PASS
 ok  	github.com/octu0/chanque	6.935s
-```
-
-## Functions
-
-### type `Queue`
-
-```
-NewQueue(capacity int, fn ...QueueOptionFunc) *Queue
-
-func(*Queue) Enqueue(value interface{}) (written bool)
-func(*Queue) EnqueueNB(value interface{}) (written bool)
-func(*Queue) EnqueueRetry(value interface{}, interval time.Duration, retry int) (written bool)
-
-func(*Queue) Dequeue() (value interface{}, found bool)
-func(*Queue) DequeueNB() (value interface{}, found bool)
-func(*Queue) DequeueRetry(interval time.Duration, retry int) (value interface{}, found bool)
-
-func(*Queue) Close() (closed bool)
-```
-
-### type `Executor`
-
-```
-type Job func()
-
-NewExecutor(minWorker, maxWorker int, fn ...ExecutorOptionFunc) *Executor
-
-func(*Executor) Submit(Job)
-func(*Executor) Release()
-func(*Executor) ReleaseAndWait()
-func(*Executor) Running() int32
-func(*Executor) Workers() int32
-func(*Executor) SubExecutor() *SubExecutor
-func(*Executor) MinWorker() int
-func(*Executor) MaxWorker() int
-func(*Executor) TuneMinWorker(nextMinWorker int)
-func(*Executor) TuneMaxWorker(nextMaxWorker int)
-
-func(*SubExecutor) Submit(Job)
-func(*SubExecutor) Wait()
-```
-
-### type `Worker`
-
-```
-type WorkerHandler func(parameter interface{})
-
-NewDefaultWorker(handler WorkerHandler, fn ...WorkerOptionFunc)
-NewBufferWorker(handler WorkerHandler, fn ...WorkerOptionFunc)
-
-func(Worker) Enqueue(parameter interface{}) bool
-func(Worker) CloseEnqueue() bool
-func(Worker) Shutdown()
-func(Worker) ShutdownAndWait()
-```
-
-### type `Parallel`
-
-```
-type ParallelJob func() (result interface{}, err error)
-NewParallel(*Executor) *Parallel
-
-func (*Parallel) Queue(ParallelJob)
-func (*Parallel) Submit() *ParallelFuture
-
-func (*ParallelFuture) Result() []ValueError
-
-func (ValueError) Value() interface{}
-func (ValueError) Err()   error
-```
-
-### type `Retry`
-
-```
-type RetryFunc func(context.Context) (result interface{}, err error)
-type RetryErrorHandler func(err error, b *Backoff) RetryNext
-
-NewBackoff(min,max time.Duration) *Backoff
-NewBackoffNoJitter(min,max time.Duration) *Backoff
-
-NewRetry(*Executor) *Retry
-NewRetryWithBackoff(*Executor, *Backoff)
-
-func (*Retry) Retry(RetryFunc) *RetryFuture
-func (*Retry) RetryWithErrorHandler(RetryFunc, RetryErrorHandler) *RetryFuture
-
-func (*RetryFuture) Result() ValueError
-
-func (ValueError) Value() interface{}
-func (ValueError) Err()   error
-```
-
-### type `Pipeline`
-
-```
-NewPipeline(PipelineInputFunc, PipelineOutputFunc, fn ...PipelineOptionFunc) *Pipeline
-
-type PipelineInputFunc  func(parameter interface{}) (result interface{}, err error)
-type PipelineOutputFunc func(result interface{}, err error)
-
-func(*Pipeline) Enqueue(parameter interface{}) bool
-func(*Pipeline) CloseEnqueue() bool
-func(*Pipeline) Shutdown()
-func(*Pipeline) ShutdownAndWait()
-```
-
-### type `Context` / `ContextTimeout`
-
-```
-NewContext(e *Executor, fn DoneFunc) *Context
-NewContextTimeout(e *Executor, fn DoneFunc, timeout time.Duration) *ContextTimeout
-
-func(*Context) Add() (cancel DoneFunc)
-func(*Context) Wait()
-func(*Context) Background()
-
-func(*ContextTimeout) Add() (cancel DoneFunc)
-func(*ContextTimeout) Wait()
-func(*ContextTimeout) Background()
-```
-
-### type `Loop`
-
-```
-NewLoop(e *Executor, fn ...LoopOptionFunc) *Loop
-
-const(
-  LoopNextContinue LoopNext = 1
-  LoopNextBreak    LoopNext = 2
-)
-
-type LoopDefaultHandler  func() LoopNext
-type LoopDequeueHandler  func(val interface{}, ok bool) LoopNext
-type LoopTickerHandler   func() LoopNext
-
-func(*Loop) SetDefeult(LoopDefaultHandler) // select { case ...; default: }
-func(*Loop) SetTicker(LoopTickerHandler, time.Duration) // select { case <-tick.C: }
-func(*Loop) SetDequeue(LoopDequeueHandler, *Queue)  // select { case val, ok <-queue: }
-func(*Loop) Execute()
-func(*Loop) ExecuteTimeout(time.Duration)
-func(*Loop) Stop()
-func(*Loop) StopAndWait()
 ```
 
 ## License
