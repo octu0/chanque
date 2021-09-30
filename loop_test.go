@@ -67,7 +67,7 @@ func TestLoopExecute(t *testing.T) {
 			}
 			tt.Logf("next break")
 			return LoopNextBreak
-		}, 5 * time.Millisecond)
+		}, 5*time.Millisecond)
 		lo.Execute()
 
 		time.Sleep(10 * time.Millisecond)
@@ -135,62 +135,62 @@ func TestLoopExecute(t *testing.T) {
 			tt.Errorf("loop running: %d", e.Running())
 		}
 	})
-  /*
-	t.Run("default/ticker", func(tt *testing.T) {
-		e := NewExecutor(1, 1)
-		defer e.Release()
+	/*
+		t.Run("default/ticker", func(tt *testing.T) {
+			e := NewExecutor(1, 1)
+			defer e.Release()
 
-		lo := NewLoop(e)
+			lo := NewLoop(e)
 
-		c1, c2 := 0, 0
-		lo.SetDefault(func() LoopNext {
-			if c1 < 10 {
-				c1 += 1
-				time.Sleep(5 * time.Millisecond)
-				tt.Logf("next continue")
-				return LoopNextContinue
+			c1, c2 := 0, 0
+			lo.SetDefault(func() LoopNext {
+				if c1 < 10 {
+					c1 += 1
+					time.Sleep(5 * time.Millisecond)
+					tt.Logf("next continue")
+					return LoopNextContinue
+				}
+				tt.Logf("next break")
+				return LoopNextBreak
+			})
+			lo.SetTicker(func() LoopNext {
+				if c2 < 10 {
+					c2 += 1
+					tt.Logf("next ticker continue")
+					return LoopNextContinue
+				}
+				tt.Logf("next ticker break")
+				return LoopNextBreak
+			}, 20 * time.Millisecond)
+			lo.Execute()
+
+			time.Sleep(10 * time.Millisecond)
+
+			if (0 < c1 && c1 < 10) != true {
+				tt.Errorf("run default: %d", c1)
 			}
-			tt.Logf("next break")
-			return LoopNextBreak
+
+			if (0 <= c2 && c2 < 10) != true {
+				tt.Errorf("run ticker: %d", c2)
+			}
+
+			time.Sleep(100 * time.Millisecond)
+
+			if c1 != 10 {
+				tt.Errorf("run default end: %d", c1)
+			}
+			if c2 == 0 || c2 < 7 {
+				tt.Errorf("run ticker end: %d", c2)
+			}
+
+			lo.StopAndWait()
+			time.Sleep(10 * time.Millisecond)
+
+			if e.Running() != 0 {
+				tt.Errorf("loop running: %d", e.Running())
+			}
 		})
-		lo.SetTicker(func() LoopNext {
-			if c2 < 10 {
-				c2 += 1
-				tt.Logf("next ticker continue")
-				return LoopNextContinue
-			}
-			tt.Logf("next ticker break")
-			return LoopNextBreak
-		}, 20 * time.Millisecond)
-		lo.Execute()
-
-		time.Sleep(10 * time.Millisecond)
-
-		if (0 < c1 && c1 < 10) != true {
-			tt.Errorf("run default: %d", c1)
-		}
-
-		if (0 <= c2 && c2 < 10) != true {
-			tt.Errorf("run ticker: %d", c2)
-		}
-
-		time.Sleep(100 * time.Millisecond)
-
-		if c1 != 10 {
-			tt.Errorf("run default end: %d", c1)
-		}
-		if c2 == 0 || c2 < 7 {
-			tt.Errorf("run ticker end: %d", c2)
-		}
-
-		lo.StopAndWait()
-		time.Sleep(10 * time.Millisecond)
-
-		if e.Running() != 0 {
-			tt.Errorf("loop running: %d", e.Running())
-		}
-	})
-  */
+	*/
 	t.Run("default/queue", func(tt *testing.T) {
 		e := NewExecutor(1, 1)
 		defer e.Release()
