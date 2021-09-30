@@ -26,15 +26,20 @@ func (w *Wait) Cancel() {
 }
 
 func (w *Wait) Wait() error {
-	select {
-	case <-w.ctx.Done():
-		return w.ctx.Err()
-	case <-w.waitCh:
-		return nil
-	}
+	return w.WaitTimeout(-1)
 }
 
 func (w *Wait) WaitTimeout(dur time.Duration) error {
+	if dur < 0 {
+		select {
+		case <-w.ctx.Done():
+			return w.ctx.Err()
+		case <-w.waitCh:
+			return nil
+		}
+		return nil
+	}
+
 	select {
 	case <-time.After(dur):
 		return ErrWaitingTimeout
