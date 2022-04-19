@@ -1,6 +1,7 @@
 package chanque
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ func TestWorkerSequence(t *testing.T) {
 
 			c = append(c, p.(int))
 
-			time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(10)+10) * time.Millisecond)
 		}
 		w := f(h)
 		for i := 0; i < s; i += 1 {

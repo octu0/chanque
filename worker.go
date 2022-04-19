@@ -3,6 +3,7 @@ package chanque
 import (
 	"context"
 	"sync/atomic"
+	"time"
 )
 
 type Worker interface {
@@ -305,15 +306,18 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	if opt.executor == nil {
 		opt.executor = NewExecutor(2, 2) // checker + dequeue
 	}
-	if 0 < opt.capacity {
-		// buffer worker ignore capacity
+
+	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
+		if opt.capacity < opt.maxDequeueSize {
+			opt.maxDequeueSize = opt.capacity
+		}
 	}
 
 	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &bufferWorker{
 		defaultWorker: &defaultWorker{
 			opt:     opt,
-			queue:   NewQueue(0, QueuePanicHandler(opt.panicHandler)),
+			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 			handler: handler,
 			closed:  workerEnqueueInit,
 			ctx:     ctx,
@@ -392,17 +396,30 @@ func (w *bufferWorker) submitBuffer(parameters []interface{}, done func()) {
 func (w *bufferWorker) runloop() {
 	running := int32(0)
 
+	deq := NewQueue(1, QueuePanicHandler(noopPanicHandler))
+	defer deq.Close()
+
 	buffer := make([]interface{}, 0)
 	defer func() {
+		// wait submit handler
+		submitting := true
+		for submitting {
+			if atomic.CompareAndSwapInt32(&running, 0, 1) != true {
+				submitting = false
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+
 		if 0 < len(buffer) {
 			w.submitBuffer(buffer, bufferExecNoopDone)
 		}
 		w.cancel() // ensure release
 	}()
 
-	deq := NewQueue(1, QueuePanicHandler(noopPanicHandler))
-	defer deq.Close()
-
+	readMulti := false
+	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+		readMulti = true
+	}
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -413,6 +430,28 @@ func (w *bufferWorker) runloop() {
 				return
 			}
 			buffer = append(buffer, param)
+
+			if readMulti != true {
+				deq.EnqueueNB(struct{}{})
+				continue
+			}
+
+			run := true
+			for run {
+				select {
+				case p, succ := <-w.queue.Chan():
+					if succ != true {
+						run = false
+					} else {
+						buffer = append(buffer, p)
+						if w.opt.maxDequeueSize <= len(buffer) {
+							run = false
+						}
+					}
+				default:
+					run = false
+				}
+			}
 			deq.EnqueueNB(struct{}{})
 
 		case <-deq.Chan():
