@@ -524,3 +524,112 @@ func TestWorkerCapacity(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkerDequeue(t *testing.T) {
+	t.Run("default/cap10/deqSize3", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		expect := []string{
+			"pre", "0", "1", "2", "post",
+		}
+		values := make([]string, 0, 10)
+
+		done := make(chan struct{})
+		w := NewDefaultWorker(func(param interface{}) {
+			if param.(string) == "stop" {
+				close(done)
+				return
+			}
+			values = append(values, param.(string))
+		}, WorkerPreHook(func() {
+			values = append(values, "pre")
+		}), WorkerPostHook(func() {
+			values = append(values, "post")
+		}), WorkerCapacity(10), WorkerMaxDequeueSize(3))
+
+		for i := 0; i < 13; i += 1 {
+			w.Enqueue(fmt.Sprintf("%d", i))
+		}
+		w.Enqueue("stop")
+		<-done
+
+		tt.Logf("max < cap")
+		for i, _ := range expect {
+			if values[i] != expect[i] {
+				tt.Errorf("v[%d] expect %s actual %s", i, expect[i], values[i])
+			}
+		}
+	})
+	t.Run("default/cap5/deqSize10", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		expect := []string{
+			"pre", "0", "1", "2", "3", "4", "post",
+		}
+		values := make([]string, 0, 10)
+
+		done := make(chan struct{})
+		w := NewDefaultWorker(func(param interface{}) {
+			if param.(string) == "stop" {
+				close(done)
+				return
+			}
+			values = append(values, param.(string))
+		}, WorkerPreHook(func() {
+			values = append(values, "pre")
+		}), WorkerPostHook(func() {
+			values = append(values, "post")
+		}), WorkerCapacity(5), WorkerMaxDequeueSize(10))
+
+		for i := 0; i < 10; i += 1 {
+			w.Enqueue(fmt.Sprintf("%d", i))
+		}
+		w.Enqueue("stop")
+		<-done
+
+		tt.Logf("max = cap")
+		for i, _ := range expect {
+			if values[i] != expect[i] {
+				tt.Errorf("v[%d] expect %s actual %s", i, expect[i], values[i])
+			}
+		}
+	})
+	t.Run("buffer/cap10/deqSize3", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		expect := []string{
+			"pre", "0", "1", "2", "post",
+		}
+		values := make([]string, 0, 10)
+
+		done := make(chan struct{})
+		w := NewBufferWorker(func(param interface{}) {
+			if param.(string) == "stop" {
+				close(done)
+				return
+			}
+			values = append(values, param.(string))
+		}, WorkerPreHook(func() {
+			values = append(values, "pre")
+		}), WorkerPostHook(func() {
+			values = append(values, "post")
+		}), WorkerCapacity(10), WorkerMaxDequeueSize(3))
+
+		for i := 0; i < 13; i += 1 {
+			w.Enqueue(fmt.Sprintf("%d", i))
+		}
+		w.Enqueue("stop")
+		<-done
+
+		tt.Logf("max < cap")
+		tt.Logf("%v", values)
+		for i, _ := range expect {
+			if values[i] != expect[i] {
+				tt.Errorf("v[%d] expect %s actual %s", i, expect[i], values[i])
+			}
+		}
+	})
+}

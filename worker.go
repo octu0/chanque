@@ -37,6 +37,7 @@ type optWorker struct {
 	abortQueueHandler WorkerAbortQueueHandlerFunc
 	executor          *Executor
 	capacity          int
+	maxDequeueSize    int
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -78,6 +79,12 @@ func WorkerExecutor(executor *Executor) WorkerOptionFunc {
 func WorkerCapacity(capacity int) WorkerOptionFunc {
 	return func(opt *optWorker) {
 		opt.capacity = capacity
+	}
+}
+
+func WorkerMaxDequeueSize(size int) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.maxDequeueSize = size
 	}
 }
 
@@ -129,6 +136,12 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 		opt.capacity = 0
 	}
 
+	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
+		if opt.capacity < opt.maxDequeueSize {
+			opt.maxDequeueSize = opt.capacity
+		}
+	}
+
 	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &defaultWorker{
 		opt:     opt,
@@ -144,7 +157,11 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 }
 
 func (w *defaultWorker) initWorker() {
-	w.subexec.Submit(w.runloop)
+	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+		w.subexec.Submit(w.runloopMilti)
+	} else {
+		w.subexec.Submit(w.runloop)
+	}
 }
 
 func (w *defaultWorker) ForceStop() {
@@ -204,6 +221,50 @@ func (w *defaultWorker) runloop() {
 			w.opt.preHook()
 			w.handler(param)
 			w.opt.postHook()
+		}
+	}
+}
+
+func (w *defaultWorker) runloopMilti() {
+	defer w.cancel() // ensure release
+
+	var params = make([]interface{}, 0, w.opt.maxDequeueSize+1)
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+
+		case param, ok := <-w.queue.Chan():
+			if ok != true {
+				return
+			}
+
+			params = append(params, param)
+
+			run := true
+			for run {
+				select {
+				case p, succ := <-w.queue.Chan():
+					if succ != true {
+						run = false
+					} else {
+						params = append(params, p)
+						if w.opt.maxDequeueSize <= len(params) {
+							run = false
+						}
+					}
+				default:
+					run = false
+				}
+			}
+
+			w.opt.preHook()
+			for _, param := range params {
+				w.handler(param)
+			}
+			w.opt.postHook()
+
+			params = params[len(params):]
 		}
 	}
 }
