@@ -3,6 +3,7 @@ package chanque
 import (
 	"context"
 	"sync/atomic"
+	"time"
 )
 
 type Worker interface {
@@ -37,6 +38,7 @@ type optWorker struct {
 	abortQueueHandler WorkerAbortQueueHandlerFunc
 	executor          *Executor
 	capacity          int
+	maxDequeueSize    int
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -78,6 +80,12 @@ func WorkerExecutor(executor *Executor) WorkerOptionFunc {
 func WorkerCapacity(capacity int) WorkerOptionFunc {
 	return func(opt *optWorker) {
 		opt.capacity = capacity
+	}
+}
+
+func WorkerMaxDequeueSize(size int) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.maxDequeueSize = size
 	}
 }
 
@@ -129,6 +137,12 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 		opt.capacity = 0
 	}
 
+	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
+		if opt.capacity < opt.maxDequeueSize {
+			opt.maxDequeueSize = opt.capacity
+		}
+	}
+
 	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &defaultWorker{
 		opt:     opt,
@@ -144,7 +158,11 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 }
 
 func (w *defaultWorker) initWorker() {
-	w.subexec.Submit(w.runloop)
+	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+		w.subexec.Submit(w.runloopMilti)
+	} else {
+		w.subexec.Submit(w.runloop)
+	}
 }
 
 func (w *defaultWorker) ForceStop() {
@@ -208,6 +226,50 @@ func (w *defaultWorker) runloop() {
 	}
 }
 
+func (w *defaultWorker) runloopMilti() {
+	defer w.cancel() // ensure release
+
+	var params = make([]interface{}, 0, w.opt.maxDequeueSize+1)
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+
+		case param, ok := <-w.queue.Chan():
+			if ok != true {
+				return
+			}
+
+			params = append(params, param)
+
+			run := true
+			for run {
+				select {
+				case p, succ := <-w.queue.Chan():
+					if succ != true {
+						run = false
+					} else {
+						params = append(params, p)
+						if w.opt.maxDequeueSize <= len(params) {
+							run = false
+						}
+					}
+				default:
+					run = false
+				}
+			}
+
+			w.opt.preHook()
+			for _, param := range params {
+				w.handler(param)
+			}
+			w.opt.postHook()
+
+			params = params[len(params):]
+		}
+	}
+}
+
 // compile check
 var (
 	_ Worker = (*bufferWorker)(nil)
@@ -244,15 +306,18 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	if opt.executor == nil {
 		opt.executor = NewExecutor(2, 2) // checker + dequeue
 	}
-	if 0 < opt.capacity {
-		// buffer worker ignore capacity
+
+	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
+		if opt.capacity < opt.maxDequeueSize {
+			opt.maxDequeueSize = opt.capacity
+		}
 	}
 
 	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &bufferWorker{
 		defaultWorker: &defaultWorker{
 			opt:     opt,
-			queue:   NewQueue(0, QueuePanicHandler(opt.panicHandler)),
+			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 			handler: handler,
 			closed:  workerEnqueueInit,
 			ctx:     ctx,
@@ -331,17 +396,30 @@ func (w *bufferWorker) submitBuffer(parameters []interface{}, done func()) {
 func (w *bufferWorker) runloop() {
 	running := int32(0)
 
+	deq := NewQueue(1, QueuePanicHandler(noopPanicHandler))
+	defer deq.Close()
+
 	buffer := make([]interface{}, 0)
 	defer func() {
+		// wait submit handler
+		submitting := true
+		for submitting {
+			if atomic.CompareAndSwapInt32(&running, 0, 1) != true {
+				submitting = false
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+
 		if 0 < len(buffer) {
 			w.submitBuffer(buffer, bufferExecNoopDone)
 		}
 		w.cancel() // ensure release
 	}()
 
-	deq := NewQueue(1, QueuePanicHandler(noopPanicHandler))
-	defer deq.Close()
-
+	readMulti := false
+	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+		readMulti = true
+	}
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -352,6 +430,28 @@ func (w *bufferWorker) runloop() {
 				return
 			}
 			buffer = append(buffer, param)
+
+			if readMulti != true {
+				deq.EnqueueNB(struct{}{})
+				continue
+			}
+
+			run := true
+			for run {
+				select {
+				case p, succ := <-w.queue.Chan():
+					if succ != true {
+						run = false
+					} else {
+						buffer = append(buffer, p)
+						if w.opt.maxDequeueSize <= len(buffer) {
+							run = false
+						}
+					}
+				default:
+					run = false
+				}
+			}
 			deq.EnqueueNB(struct{}{})
 
 		case <-deq.Chan():
