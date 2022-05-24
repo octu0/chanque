@@ -509,3 +509,53 @@ func TestLoopTimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestLoopTickerPool(t *testing.T) {
+	p := newLoopTickerPool()
+
+	s1 := time.Now()
+	d1 := make(chan struct{})
+	go func(d chan struct{}) {
+		defer close(d)
+
+		tick := p.Get(10 * time.Millisecond)
+		defer p.Put(tick)
+
+		i := 0
+		for i < 10 {
+			select {
+			case <-tick.C:
+				i += 1
+			}
+		}
+	}(d1)
+	<-d1
+	e1 := time.Since(s1)
+
+	s2 := time.Now()
+	d2 := make(chan struct{})
+	go func(d chan struct{}) {
+		defer close(d)
+
+		tick := p.Get(50 * time.Millisecond)
+		defer p.Put(tick)
+
+		i := 0
+		for i < 10 {
+			select {
+			case <-tick.C:
+				i += 1
+			}
+		}
+	}(d2)
+	<-d2
+	e2 := time.Since(s2)
+
+	if e1 < (100 * time.Millisecond) {
+		t.Errorf("wait 10ms * 10, actual: %s", e1)
+	}
+	if e2 < (500 * time.Millisecond) {
+		t.Errorf("wait 50ms * 10, actual: %s", e2)
+	}
+	t.Logf("elapse 1:%s 2:%s", e1, e2)
+}
