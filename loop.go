@@ -6,6 +6,32 @@ import (
 	"time"
 )
 
+type loopTickerPool struct {
+	pool *sync.Pool
+}
+
+func (p *loopTickerPool) Get(dur time.Duration) *time.Ticker {
+	if v := p.pool.Get(); v != nil {
+		if t, ok := v.(*time.Ticker); ok {
+			// reuse
+			t.Reset(dur)
+			return t
+		}
+	}
+	return time.NewTicker(dur)
+}
+
+func (p *loopTickerPool) Put(t *time.Ticker) {
+	t.Stop()
+	p.pool.Put(t)
+}
+
+func newLoopTickerPool() *loopTickerPool {
+	return &loopTickerPool{
+		pool: new(sync.Pool),
+	}
+}
+
 type LoopNext uint8
 
 const (
@@ -31,6 +57,10 @@ func LoopContext(ctx context.Context) LoopOptionFunc {
 	}
 }
 
+var (
+	tickerPool = newLoopTickerPool()
+)
+
 type loopMux struct {
 	ticker         *time.Ticker
 	tickerHandler  LoopTickerHandler
@@ -41,7 +71,7 @@ type loopMux struct {
 
 func (m *loopMux) loopJob(ctx context.Context) Job {
 	return func() {
-		defer m.stopTicker()
+		defer m.releaseTicker()
 
 		for {
 			next := m.sel(ctx)
@@ -52,9 +82,10 @@ func (m *loopMux) loopJob(ctx context.Context) Job {
 	}
 }
 
-func (m *loopMux) stopTicker() {
+func (m *loopMux) releaseTicker() {
 	if m.ticker != nil {
-		m.ticker.Stop()
+		tickerPool.Put(m.ticker)
+		m.ticker = nil
 	}
 }
 
@@ -240,7 +271,10 @@ func (lo *Loop) SetTicker(h LoopTickerHandler, dur time.Duration) {
 	lo.mutex.Lock()
 	defer lo.mutex.Unlock()
 
-	lo.mux.ticker = time.NewTicker(dur)
+	if lo.mux.ticker != nil {
+		tickerPool.Put(lo.mux.ticker)
+	}
+	lo.mux.ticker = tickerPool.Get(dur)
 	lo.mux.tickerHandler = h
 }
 
