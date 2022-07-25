@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+const (
+	defaultReducerInterval = 10 * time.Second
+)
+
 type Job func()
 
 type ExecutorOptionFunc func(*optExecutor)
@@ -41,10 +45,6 @@ func ExecutorContext(ctx context.Context) ExecutorOptionFunc {
 		opt.ctx = ctx
 	}
 }
-
-var (
-	defaultReducerInterval = 10 * time.Second
-)
 
 type Executor struct {
 	mutex           *sync.Mutex
@@ -128,11 +128,11 @@ func (e *Executor) goExecLoop(num int) {
 	}
 
 	for i := 0; i < num; i += 1 {
-		e.increWorker()
 		jctx, jcancel := context.WithCancel(e.ctx)
 		e.jobCancel = append(e.jobCancel, jcancel)
 
 		e.wg.Add(1)
+		e.increWorker()
 		go e.execloop(jctx, e.jobs)
 	}
 }
@@ -212,38 +212,41 @@ func (e *Executor) Workers() int32 {
 }
 
 func (e *Executor) startOndemand() {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
+	running := e.Running()
+	workerSize := e.Workers()
+	nextSize := running + 1
 
-	running := int(e.Running())
-	if running < e.minWorker {
-		return
-	}
-
-	next := int(e.Workers()) + 1
-	if running < next {
-		if e.minWorker < next {
-			if next <= e.maxWorker {
-				e.goExecLoop(1)
-				return
-			}
+	switch {
+	case workerSize < nextSize:
+		needToWorkerSize := int(nextSize - workerSize)
+		if e.maxWorker < needToWorkerSize {
+			needToWorkerSize = needToWorkerSize - e.maxWorker
 		}
+		if needToWorkerSize < 1 {
+			needToWorkerSize = 1
+		}
+		e.goExecLoop(needToWorkerSize)
+	case workerSize == nextSize:
+		e.goExecLoop(1)
 	}
 }
 
 // enqueue job
 func (e *Executor) Submit(fn Job) {
+	if fn == nil {
+		return
+	}
+
 	defer func() {
 		if rcv := recover(); rcv != nil {
 			e.callPanicHandler(PanicTypeEnqueue, rcv)
 		}
 	}()
 
-	if fn == nil {
-		return
-	}
-
+	e.mutex.Lock()
 	e.startOndemand()
+	e.mutex.Unlock()
+
 	e.jobs.Enqueue(fn)
 }
 
@@ -338,6 +341,13 @@ func (e *Executor) execloop(ctx context.Context, jobs *Queue) {
 			}
 
 			e.increRunning()
+
+			if e.Running() <= e.Workers() {
+				// job added in a short interval will not be allocated,
+				// maybe when Worker has been in use for a long-term or Worker in blocking process.
+				e.startOndemand()
+			}
+
 			fn := job.(Job)
 			fn()
 			e.decreRunning()
