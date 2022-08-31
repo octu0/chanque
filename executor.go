@@ -1,7 +1,10 @@
 package chanque
 
 import (
+	"bytes"
 	"context"
+	"hash/fnv"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,10 +19,11 @@ type Job func()
 type ExecutorOptionFunc func(*optExecutor)
 
 type optExecutor struct {
-	ctx             context.Context
-	panicHandler    PanicHandler
-	reducerInterval time.Duration
-	maxCapacity     int
+	ctx               context.Context
+	panicHandler      PanicHandler
+	reducerInterval   time.Duration
+	maxCapacity       int
+	collectStacktrace bool
 }
 
 func ExecutorPanicHandler(handler PanicHandler) ExecutorOptionFunc {
@@ -46,67 +50,33 @@ func ExecutorContext(ctx context.Context) ExecutorOptionFunc {
 	}
 }
 
-type Executor struct {
-	mutex           *sync.Mutex
-	wg              *sync.WaitGroup
-	jobs            *Queue
-	ctx             context.Context
-	jobCancel       []context.CancelFunc
-	healthCancel    context.CancelFunc
-	minWorker       int
-	maxWorker       int
-	panicHandler    PanicHandler
-	reducerInterval time.Duration
-	runningNum      int32
-	workerNum       int32
+func ExecutorCollectStacktrace(enable bool) ExecutorOptionFunc {
+	return func(opt *optExecutor) {
+		opt.collectStacktrace = enable
+	}
 }
 
-func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executor {
-	opt := new(optExecutor)
-	for _, fn := range funcs {
-		fn(opt)
-	}
+type executeJob struct {
+	job              Job
+	stacktraceID     uint64
+	removeStacktrace bool
+}
 
-	if minWorker < 1 {
-		minWorker = 0
-	}
-	if maxWorker < 1 {
-		maxWorker = 1
-	}
-	if maxWorker < minWorker {
-		maxWorker = minWorker
-	}
-
-	if opt.maxCapacity < 1 {
-		opt.maxCapacity = 0
-	}
-	if opt.panicHandler == nil {
-		opt.panicHandler = defaultPanicHandler
-	}
-	if opt.reducerInterval < 1 {
-		opt.reducerInterval = defaultReducerInterval
-	}
-	if opt.ctx == nil {
-		opt.ctx = context.Background()
-	}
-
-	e := &Executor{
-		mutex:           new(sync.Mutex),
-		wg:              new(sync.WaitGroup),
-		jobs:            NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler)),
-		ctx:             opt.ctx,
-		jobCancel:       make([]context.CancelFunc, 0),
-		healthCancel:    nil,
-		minWorker:       minWorker,
-		maxWorker:       maxWorker,
-		panicHandler:    opt.panicHandler,
-		reducerInterval: opt.reducerInterval,
-		runningNum:      int32(0),
-		workerNum:       int32(0),
-	}
-
-	e.initWorker()
-	return e
+type Executor struct {
+	mutex             *sync.RWMutex
+	wg                *sync.WaitGroup
+	jobs              *Queue
+	ctx               context.Context
+	jobCancel         []context.CancelFunc
+	healthCancel      context.CancelFunc
+	minWorker         int
+	maxWorker         int
+	panicHandler      PanicHandler
+	reducerInterval   time.Duration
+	runningNum        int32
+	workerNum         int32
+	collectStacktrace bool
+	stacktraces       map[uint64][]byte
 }
 
 func (e *Executor) initWorker() {
@@ -119,7 +89,7 @@ func (e *Executor) initWorker() {
 	e.healthCancel = hcancel
 
 	e.wg.Add(1)
-	go e.healthloop(hctx, e.jobs)
+	go e.healthloop(hctx)
 }
 
 func (e *Executor) goExecLoop(num int) {
@@ -247,7 +217,22 @@ func (e *Executor) Submit(fn Job) {
 	e.startOndemand()
 	e.mutex.Unlock()
 
-	e.jobs.Enqueue(fn)
+	if e.collectStacktrace {
+		id, stack := currentStacktrace()
+		e.putStacktrace(id, stack)
+		e.jobs.Enqueue(&executeJob{
+			job:              fn,
+			stacktraceID:     id,
+			removeStacktrace: true,
+		})
+		return
+	}
+
+	e.jobs.Enqueue(&executeJob{
+		job:              fn,
+		stacktraceID:     0,
+		removeStacktrace: false,
+	})
 }
 
 func (e *Executor) ForceStop() {
@@ -294,7 +279,7 @@ func (e *Executor) releaseJob(reduceSize int) {
 	}
 }
 
-func (e *Executor) healthloop(ctx context.Context, jobs *Queue) {
+func (e *Executor) healthloop(ctx context.Context) {
 	defer e.wg.Done()
 	defer func() {
 		if rcv := recover(); rcv != nil {
@@ -348,8 +333,12 @@ func (e *Executor) execloop(ctx context.Context, jobs *Queue) {
 				e.startOndemand()
 			}
 
-			fn := job.(Job)
-			fn()
+			exec := job.(*executeJob)
+			exec.job()
+
+			if exec.removeStacktrace {
+				e.deleteStacktrace(exec.stacktraceID)
+			}
 			e.decreRunning()
 		}
 	}
@@ -359,16 +348,94 @@ func (e *Executor) SubExecutor() *SubExecutor {
 	return newSubExecutor(e)
 }
 
+func (e *Executor) putStacktrace(id uint64, stack []byte) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	e.stacktraces[id] = stack
+}
+
+func (e *Executor) deleteStacktrace(id uint64) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	delete(e.stacktraces, id)
+}
+
+func (e *Executor) CurrentStacktrace() []byte {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	size := 0
+	for _, buf := range e.stacktraces {
+		size += len(buf)
+	}
+
+	out := bytes.NewBuffer(make([]byte, 0, size))
+	for _, buf := range e.stacktraces {
+		out.Write(buf)
+	}
+	return out.Bytes()
+}
+
+func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executor {
+	opt := new(optExecutor)
+	for _, fn := range funcs {
+		fn(opt)
+	}
+
+	if minWorker < 1 {
+		minWorker = 0
+	}
+	if maxWorker < 1 {
+		maxWorker = 1
+	}
+	if maxWorker < minWorker {
+		maxWorker = minWorker
+	}
+
+	if opt.maxCapacity < 1 {
+		opt.maxCapacity = 0
+	}
+	if opt.panicHandler == nil {
+		opt.panicHandler = defaultPanicHandler
+	}
+	if opt.reducerInterval < 1 {
+		opt.reducerInterval = defaultReducerInterval
+	}
+	if opt.ctx == nil {
+		opt.ctx = context.Background()
+	}
+
+	stacktracesSize := 0
+	if opt.collectStacktrace {
+		stacktracesSize = minWorker
+	}
+
+	e := &Executor{
+		mutex:             new(sync.RWMutex),
+		wg:                new(sync.WaitGroup),
+		jobs:              NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler)),
+		ctx:               opt.ctx,
+		jobCancel:         make([]context.CancelFunc, 0),
+		healthCancel:      nil,
+		minWorker:         minWorker,
+		maxWorker:         maxWorker,
+		panicHandler:      opt.panicHandler,
+		reducerInterval:   opt.reducerInterval,
+		runningNum:        int32(0),
+		workerNum:         int32(0),
+		collectStacktrace: opt.collectStacktrace,
+		stacktraces:       make(map[uint64][]byte, stacktracesSize),
+	}
+
+	e.initWorker()
+	return e
+}
+
 type SubExecutor struct {
 	wg     *sync.WaitGroup
 	parent *Executor
-}
-
-func newSubExecutor(parent *Executor) *SubExecutor {
-	return &SubExecutor{
-		wg:     new(sync.WaitGroup),
-		parent: parent,
-	}
 }
 
 func (s *SubExecutor) Submit(fn Job) {
@@ -380,9 +447,29 @@ func (s *SubExecutor) Wait() {
 	s.wg.Wait()
 }
 
+func newSubExecutor(parent *Executor) *SubExecutor {
+	return &SubExecutor{
+		wg:     new(sync.WaitGroup),
+		parent: parent,
+	}
+}
+
 func runSubExec(wg *sync.WaitGroup, fn Job) Job {
 	return func() {
 		defer wg.Done()
 		fn()
+	}
+}
+
+func currentStacktrace() (uint64, []byte) {
+	h := fnv.New64()
+	buf := make([]byte, 1024)
+	for {
+		n := runtime.Stack(buf, false)
+		if n < len(buf) {
+			h.Write(buf[:n])
+			return h.Sum64(), buf[:n]
+		}
+		buf = make([]byte, len(buf)*2)
 	}
 }
