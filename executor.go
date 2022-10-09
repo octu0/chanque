@@ -334,7 +334,9 @@ func (e *Executor) execloop(ctx context.Context, jobs *Queue) {
 			}
 
 			exec := job.(*executeJob)
-			exec.job()
+			j := exec.job
+			exec.job = nil // finalizable
+			j()
 
 			if exec.removeStacktrace {
 				e.deleteStacktrace(exec.stacktraceID)

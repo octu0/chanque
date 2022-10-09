@@ -28,6 +28,28 @@ func noopAbortQueueHandler(interface{}) {
 	/* noop */
 }
 
+type (
+	defaultWorkerDequeueLoopFunc func(
+		ctx context.Context,
+		queue *Queue,
+		handler WorkerHandler,
+		preHook, postHook WorkerHook,
+		maxDequeueSize int,
+	)
+)
+
+type (
+	bufferWorkerDequeueLoopFunc func(
+		ctx context.Context,
+		queue *Queue,
+		subexec *SubExecutor,
+		handler WorkerHandler,
+		preHook, postHook WorkerHook,
+		maxDequeueSize int,
+	)
+	bufferWorkerSubmitBufferFunc func(params []interface{}, done func())
+)
+
 type WorkerOptionFunc func(*optWorker)
 
 type optWorker struct {
@@ -157,12 +179,19 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	return w
 }
 
-func (w *defaultWorker) initWorker() {
+func (w *defaultWorker) workerDequeueLoop() defaultWorkerDequeueLoopFunc {
 	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
-		w.subexec.Submit(w.runloopMilti)
-	} else {
-		w.subexec.Submit(w.runloop)
+		return defaultWorkerDequeueLoopMulti
 	}
+	return defaultWorkerDequeueLoop
+}
+
+func (w *defaultWorker) initWorker() {
+	w.subexec.Submit(func(me *defaultWorker, dequeueLoop defaultWorkerDequeueLoopFunc) Job {
+		return func() {
+			dequeueLoop(me.ctx, me.queue, me.handler, me.opt.preHook, me.opt.postHook, w.opt.maxDequeueSize)
+		}
+	}(w, w.workerDequeueLoop()))
 }
 
 func (w *defaultWorker) ForceStop() {
@@ -206,36 +235,34 @@ func (w *defaultWorker) Enqueue(param interface{}) bool {
 	return w.queue.Enqueue(param)
 }
 
-func (w *defaultWorker) runloop() {
-	defer w.cancel() // ensure release
-
+// finalizer safe loop
+func defaultWorkerDequeueLoop(ctx context.Context, queue *Queue, handler WorkerHandler, preHook, postHook WorkerHook, _ int) {
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 
-		case param, ok := <-w.queue.Chan():
+		case param, ok := <-queue.Chan():
 			if ok != true {
 				return
 			}
 
-			w.opt.preHook()
-			w.handler(param)
-			w.opt.postHook()
+			preHook()
+			handler(param)
+			postHook()
 		}
 	}
 }
 
-func (w *defaultWorker) runloopMilti() {
-	defer w.cancel() // ensure release
-
-	var params = make([]interface{}, 0, w.opt.maxDequeueSize+1)
+// finalizer safe loop
+func defaultWorkerDequeueLoopMulti(ctx context.Context, queue *Queue, handler WorkerHandler, preHook, postHook WorkerHook, maxDequeueSize int) {
+	var params = make([]interface{}, 0, maxDequeueSize+1)
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 
-		case param, ok := <-w.queue.Chan():
+		case param, ok := <-queue.Chan():
 			if ok != true {
 				return
 			}
@@ -245,12 +272,12 @@ func (w *defaultWorker) runloopMilti() {
 			run := true
 			for run {
 				select {
-				case p, succ := <-w.queue.Chan():
+				case p, succ := <-queue.Chan():
 					if succ != true {
 						run = false
 					} else {
 						params = append(params, p)
-						if w.opt.maxDequeueSize <= len(params) {
+						if maxDequeueSize <= len(params) {
 							run = false
 						}
 					}
@@ -259,11 +286,11 @@ func (w *defaultWorker) runloopMilti() {
 				}
 			}
 
-			w.opt.preHook()
+			preHook()
 			for _, param := range params {
-				w.handler(param)
+				handler(param)
 			}
-			w.opt.postHook()
+			postHook()
 
 			params = params[len(params):]
 		}
@@ -330,9 +357,20 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	return w
 }
 
+func (w *bufferWorker) workerDequeueLoop() bufferWorkerDequeueLoopFunc {
+	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+		return bufferWorkerDequeueLoopMulti
+	}
+	return bufferWorkerDequeueLoopSingle
+}
+
 // run background
 func (w *bufferWorker) initWorker() {
-	w.subexec.Submit(w.runloop)
+	w.subexec.Submit(func(me *bufferWorker, dequeueLoop bufferWorkerDequeueLoopFunc) Job {
+		return func() {
+			dequeueLoop(me.ctx, me.queue, me.subexec, w.handler, w.opt.preHook, w.opt.postHook, w.opt.maxDequeueSize)
+		}
+	}(w, w.workerDequeueLoop()))
 }
 
 func (w *bufferWorker) ForceStop() {
@@ -376,24 +414,35 @@ func (w *bufferWorker) Enqueue(param interface{}) bool {
 	return w.queue.Enqueue(param)
 }
 
-// execute handler from queue
-func (w *bufferWorker) exec(parameters []interface{}, done func()) {
-	defer done()
+func createSubmitBuffer(subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook) bufferWorkerSubmitBufferFunc {
+	handleExec := func(parameters []interface{}, done func()) {
+		defer done()
 
-	w.opt.preHook()
-	for _, param := range parameters {
-		w.handler(param)
+		preHook()
+		for _, param := range parameters {
+			handler(param)
+		}
+		postHook()
 	}
-	w.opt.postHook()
+	return func(parameters []interface{}, done func()) {
+		subexec.Submit(func() {
+			handleExec(parameters, done)
+		})
+	}
 }
 
-func (w *bufferWorker) submitBuffer(parameters []interface{}, done func()) {
-	w.subexec.Submit(func() {
-		w.exec(parameters, done)
-	})
+func bufferWorkerDequeueLoopMulti(ctx context.Context, queue *Queue, subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook, maxDequeueSize int) {
+	submit := createSubmitBuffer(subexec, handler, preHook, postHook)
+	bufferWorkerDequeueLoop(ctx, queue, submit, maxDequeueSize)
 }
 
-func (w *bufferWorker) runloop() {
+func bufferWorkerDequeueLoopSingle(ctx context.Context, queue *Queue, subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook, maxDequeueSize int) {
+	submit := createSubmitBuffer(subexec, handler, preHook, postHook)
+	bufferWorkerDequeueLoop(ctx, queue, submit, 0)
+}
+
+// finalizer safe loop
+func bufferWorkerDequeueLoop(ctx context.Context, queue *Queue, submitBuffer bufferWorkerSubmitBufferFunc, maxDequeueSize int) {
 	running := int32(0)
 
 	deq := NewQueue(1, QueuePanicHandler(noopPanicHandler))
@@ -411,21 +460,20 @@ func (w *bufferWorker) runloop() {
 		}
 
 		if 0 < len(buffer) {
-			w.submitBuffer(buffer, bufferExecNoopDone)
+			submitBuffer(buffer, bufferExecNoopDone)
 		}
-		w.cancel() // ensure release
 	}()
 
 	readMulti := false
-	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+	if 0 < maxDequeueSize {
 		readMulti = true
 	}
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 
-		case param, ok := <-w.queue.Chan():
+		case param, ok := <-queue.Chan():
 			if ok != true {
 				return
 			}
@@ -439,12 +487,12 @@ func (w *bufferWorker) runloop() {
 			run := true
 			for run {
 				select {
-				case p, succ := <-w.queue.Chan():
+				case p, succ := <-queue.Chan():
 					if succ != true {
 						run = false
 					} else {
 						buffer = append(buffer, p)
-						if w.opt.maxDequeueSize <= len(buffer) {
+						if maxDequeueSize <= len(buffer) {
 							run = false
 						}
 					}
@@ -467,7 +515,7 @@ func (w *bufferWorker) runloop() {
 			copy(queue, buffer)
 			buffer = buffer[len(buffer):]
 
-			w.submitBuffer(queue, func() {
+			submitBuffer(queue, func() {
 				atomic.StoreInt32(&running, 0)
 				deq.EnqueueNB(struct{}{}) // dequeue remain buffer
 			})
