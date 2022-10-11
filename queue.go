@@ -1,7 +1,13 @@
 package chanque
 
 import (
+	"sync/atomic"
 	"time"
+)
+
+const (
+	queueInit int32 = iota
+	queueClosed
 )
 
 type QueueOptionFunc func(*optQueue)
@@ -19,22 +25,7 @@ func QueuePanicHandler(handler PanicHandler) QueueOptionFunc {
 type Queue struct {
 	ch           chan interface{}
 	panicHandler PanicHandler
-}
-
-func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
-	opt := new(optQueue)
-	for _, fn := range funcs {
-		fn(opt)
-	}
-
-	if opt.panicHandler == nil {
-		opt.panicHandler = defaultPanicHandler
-	}
-
-	return &Queue{
-		ch:           make(chan interface{}, c),
-		panicHandler: opt.panicHandler,
-	}
+	closed       int32
 }
 
 func (q *Queue) Len() int {
@@ -49,6 +40,10 @@ func (q *Queue) Chan() <-chan interface{} {
 	return q.ch
 }
 
+func (q *Queue) Closed() bool {
+	return atomic.LoadInt32(&q.closed) == queueClosed
+}
+
 func (q *Queue) Close() (closed bool) {
 	defer func() {
 		if rcv := recover(); rcv != nil {
@@ -56,6 +51,11 @@ func (q *Queue) Close() (closed bool) {
 			closed = false
 		}
 	}()
+
+	if atomic.CompareAndSwapInt32(&q.closed, queueInit, queueClosed) != true {
+		closed = false
+		return
+	}
 
 	close(q.ch)
 	closed = true
@@ -143,4 +143,21 @@ func (q *Queue) DequeueRetry(retryInterval time.Duration, retryLimit int) (val i
 	}
 	val, found = nil, false
 	return
+}
+
+func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
+	opt := new(optQueue)
+	for _, fn := range funcs {
+		fn(opt)
+	}
+
+	if opt.panicHandler == nil {
+		opt.panicHandler = defaultPanicHandler
+	}
+
+	return &Queue{
+		ch:           make(chan interface{}, c),
+		panicHandler: opt.panicHandler,
+		closed:       queueInit,
+	}
 }

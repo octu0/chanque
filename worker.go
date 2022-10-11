@@ -2,8 +2,14 @@ package chanque
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"time"
+)
+
+const (
+	workerEnqueueInit int32 = iota
+	workerEnqueueClosed
 )
 
 type Worker interface {
@@ -28,6 +34,28 @@ func noopAbortQueueHandler(interface{}) {
 	/* noop */
 }
 
+type (
+	defaultWorkerDequeueLoopFunc func(
+		ctx context.Context,
+		queue *Queue,
+		handler WorkerHandler,
+		preHook, postHook WorkerHook,
+		maxDequeueSize int,
+	)
+)
+
+type (
+	bufferWorkerDequeueLoopFunc func(
+		ctx context.Context,
+		queue *Queue,
+		subexec *SubExecutor,
+		handler WorkerHandler,
+		preHook, postHook WorkerHook,
+		maxDequeueSize int,
+	)
+	bufferWorkerSubmitBufferFunc func(params []interface{}, done func())
+)
+
 type WorkerOptionFunc func(*optWorker)
 
 type optWorker struct {
@@ -39,6 +67,8 @@ type optWorker struct {
 	executor          *Executor
 	capacity          int
 	maxDequeueSize    int
+	autoShutdown      bool
+	timeout           time.Duration
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -89,14 +119,21 @@ func WorkerMaxDequeueSize(size int) WorkerOptionFunc {
 	}
 }
 
+func WorkerAutoShutdown(enable bool) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.autoShutdown = enable
+	}
+}
+
+func WorkerTimeout(timeout time.Duration) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.timeout = timeout
+	}
+}
+
 // compile check
 var (
 	_ Worker = (*defaultWorker)(nil)
-)
-
-const (
-	workerEnqueueInit   int32 = 0
-	workerEnqueueClosed int32 = 1
 )
 
 type defaultWorker struct {
@@ -109,7 +146,69 @@ type defaultWorker struct {
 	subexec *SubExecutor
 }
 
-// run background
+func (w *defaultWorker) workerDequeueLoop() defaultWorkerDequeueLoopFunc {
+	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+		return defaultWorkerDequeueLoopMulti
+	}
+	return defaultWorkerDequeueLoop
+}
+
+func (w *defaultWorker) initWorker() {
+	w.subexec.Submit(func(me *defaultWorker, dequeueLoop defaultWorkerDequeueLoopFunc) Job {
+		return func() {
+			defer me.queue.Close()
+			dequeueLoop(me.ctx, me.queue, me.handler, me.opt.preHook, me.opt.postHook, me.opt.maxDequeueSize)
+		}
+	}(w, w.workerDequeueLoop()))
+}
+
+func (w *defaultWorker) ForceStop() {
+	w.CloseEnqueue()
+	w.cancel()
+}
+
+// release channels and executor goroutine
+func (w *defaultWorker) Shutdown() {
+	w.CloseEnqueue()
+}
+
+func (w *defaultWorker) ShutdownAndWait() {
+	w.CloseEnqueue()
+	w.subexec.Wait()
+}
+
+func (w *defaultWorker) CloseEnqueue() bool {
+	if w.tryQueueClose() {
+		w.queue.Close()
+		return true
+	}
+	return false
+}
+
+func (w *defaultWorker) tryQueueClose() bool {
+	return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
+}
+
+func (w *defaultWorker) isClosed() bool {
+	if atomic.LoadInt32(&w.closed) == workerEnqueueClosed {
+		return true
+	}
+	if w.queue.Closed() {
+		return true
+	}
+	return false
+}
+
+// enqueue parameter w/ blocking until handler running
+func (w *defaultWorker) Enqueue(param interface{}) bool {
+	if w.isClosed() {
+		// collect queue that queue closed
+		w.opt.abortQueueHandler(param)
+		return false
+	}
+	return w.queue.Enqueue(param)
+}
+
 func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	opt := new(optWorker)
 	for _, fn := range funcs {
@@ -143,99 +242,56 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &defaultWorker{
 		opt:     opt,
 		queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 		handler: handler,
 		closed:  workerEnqueueInit,
-		ctx:     ctx,
-		cancel:  cancel,
 		subexec: opt.executor.SubExecutor(),
 	}
+	if 0 < opt.timeout {
+		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
+	} else {
+		w.ctx, w.cancel = context.WithCancel(opt.ctx)
+	}
+
 	w.initWorker()
+	if opt.autoShutdown {
+		runtime.SetFinalizer(w, func(me *defaultWorker) {
+			me.Shutdown()
+		})
+	}
 	return w
 }
 
-func (w *defaultWorker) initWorker() {
-	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
-		w.subexec.Submit(w.runloopMilti)
-	} else {
-		w.subexec.Submit(w.runloop)
-	}
-}
-
-func (w *defaultWorker) ForceStop() {
-	w.CloseEnqueue()
-	w.cancel()
-}
-
-// release channels and executor goroutine
-func (w *defaultWorker) Shutdown() {
-	w.CloseEnqueue()
-}
-
-func (w *defaultWorker) ShutdownAndWait() {
-	w.CloseEnqueue()
-	w.subexec.Wait()
-}
-
-func (w *defaultWorker) CloseEnqueue() bool {
-	if w.tryQueueClose() {
-		w.queue.Close()
-		return true
-	}
-	return false
-}
-
-func (w *defaultWorker) tryQueueClose() bool {
-	return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
-}
-
-func (w *defaultWorker) isClosed() bool {
-	return atomic.LoadInt32(&w.closed) == workerEnqueueClosed
-}
-
-// enqueue parameter w/ blocking until handler running
-func (w *defaultWorker) Enqueue(param interface{}) bool {
-	if w.isClosed() {
-		// collect queue that queue closed
-		w.opt.abortQueueHandler(param)
-		return false
-	}
-	return w.queue.Enqueue(param)
-}
-
-func (w *defaultWorker) runloop() {
-	defer w.cancel() // ensure release
-
+// finalizer safe loop
+func defaultWorkerDequeueLoop(ctx context.Context, queue *Queue, handler WorkerHandler, preHook, postHook WorkerHook, _ int) {
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 
-		case param, ok := <-w.queue.Chan():
+		case param, ok := <-queue.Chan():
 			if ok != true {
 				return
 			}
 
-			w.opt.preHook()
-			w.handler(param)
-			w.opt.postHook()
+			preHook()
+			handler(param)
+			postHook()
 		}
 	}
 }
 
-func (w *defaultWorker) runloopMilti() {
-	defer w.cancel() // ensure release
-
-	var params = make([]interface{}, 0, w.opt.maxDequeueSize+1)
+// finalizer safe loop
+func defaultWorkerDequeueLoopMulti(ctx context.Context, queue *Queue, handler WorkerHandler, preHook, postHook WorkerHook, maxDequeueSize int) {
+	var params = make([]interface{}, 0, maxDequeueSize+1)
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 
-		case param, ok := <-w.queue.Chan():
+		case param, ok := <-queue.Chan():
 			if ok != true {
 				return
 			}
@@ -245,12 +301,12 @@ func (w *defaultWorker) runloopMilti() {
 			run := true
 			for run {
 				select {
-				case p, succ := <-w.queue.Chan():
+				case p, succ := <-queue.Chan():
 					if succ != true {
 						run = false
 					} else {
 						params = append(params, p)
-						if w.opt.maxDequeueSize <= len(params) {
+						if maxDequeueSize <= len(params) {
 							run = false
 						}
 					}
@@ -259,11 +315,11 @@ func (w *defaultWorker) runloopMilti() {
 				}
 			}
 
-			w.opt.preHook()
+			preHook()
 			for _, param := range params {
-				w.handler(param)
+				handler(param)
 			}
-			w.opt.postHook()
+			postHook()
 
 			params = params[len(params):]
 		}
@@ -281,6 +337,70 @@ func bufferExecNoopDone() {
 
 type bufferWorker struct {
 	*defaultWorker
+}
+
+func (w *bufferWorker) workerDequeueLoop() bufferWorkerDequeueLoopFunc {
+	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+		return bufferWorkerDequeueLoopMulti
+	}
+	return bufferWorkerDequeueLoopSingle
+}
+
+// run background
+func (w *bufferWorker) initWorker() {
+	w.subexec.Submit(func(me *bufferWorker, dequeueLoop bufferWorkerDequeueLoopFunc) Job {
+		return func() {
+			defer me.queue.Close()
+			dequeueLoop(me.ctx, me.queue, me.subexec, me.handler, me.opt.preHook, me.opt.postHook, me.opt.maxDequeueSize)
+		}
+	}(w, w.workerDequeueLoop()))
+}
+
+func (w *bufferWorker) ForceStop() {
+	w.cancel()
+}
+
+// release channels and executor goroutine
+func (w *bufferWorker) Shutdown() {
+	w.CloseEnqueue()
+}
+
+func (w *bufferWorker) ShutdownAndWait() {
+	if w.CloseEnqueue() {
+		w.subexec.Wait()
+	}
+}
+
+func (w *bufferWorker) CloseEnqueue() bool {
+	if w.tryQueueClose() {
+		w.queue.Close()
+		return true
+	}
+	return false
+}
+
+func (w *bufferWorker) tryQueueClose() bool {
+	return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
+}
+
+func (w *bufferWorker) isClosed() bool {
+	if atomic.LoadInt32(&w.closed) == workerEnqueueClosed {
+		return true
+	}
+	if w.queue.Closed() {
+		return true
+	}
+	return false
+}
+
+// enqueue parameter w/ non-blocking until capacity
+func (w *bufferWorker) Enqueue(param interface{}) bool {
+	if w.isClosed() {
+		// collect queue that queue closed
+		w.opt.abortQueueHandler(param)
+		return false
+	}
+	return w.queue.Enqueue(param)
 }
 
 func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
@@ -313,87 +433,59 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &bufferWorker{
 		defaultWorker: &defaultWorker{
 			opt:     opt,
 			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 			handler: handler,
 			closed:  workerEnqueueInit,
-			ctx:     ctx,
-			cancel:  cancel,
 			subexec: opt.executor.SubExecutor(),
 		},
 	}
+	if 0 < opt.timeout {
+		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
+	} else {
+		w.ctx, w.cancel = context.WithCancel(opt.ctx)
+	}
 
 	w.initWorker()
+	if opt.autoShutdown {
+		runtime.SetFinalizer(w, func(me *bufferWorker) {
+			me.Shutdown()
+		})
+	}
 	return w
 }
 
-// run background
-func (w *bufferWorker) initWorker() {
-	w.subexec.Submit(w.runloop)
-}
+func createSubmitBuffer(subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook) bufferWorkerSubmitBufferFunc {
+	handleExec := func(parameters []interface{}, done func()) {
+		defer done()
 
-func (w *bufferWorker) ForceStop() {
-	w.cancel()
-}
-
-// release channels and executor goroutine
-func (w *bufferWorker) Shutdown() {
-	w.CloseEnqueue()
-}
-
-func (w *bufferWorker) ShutdownAndWait() {
-	if w.CloseEnqueue() {
-		w.subexec.Wait()
+		preHook()
+		for _, param := range parameters {
+			handler(param)
+		}
+		postHook()
+	}
+	return func(parameters []interface{}, done func()) {
+		subexec.Submit(func() {
+			handleExec(parameters, done)
+		})
 	}
 }
 
-func (w *bufferWorker) CloseEnqueue() bool {
-	if w.tryQueueClose() {
-		w.queue.Close()
-		return true
-	}
-	return false
+func bufferWorkerDequeueLoopMulti(ctx context.Context, queue *Queue, subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook, maxDequeueSize int) {
+	submit := createSubmitBuffer(subexec, handler, preHook, postHook)
+	bufferWorkerDequeueLoop(ctx, queue, submit, maxDequeueSize)
 }
 
-func (w *bufferWorker) tryQueueClose() bool {
-	return atomic.CompareAndSwapInt32(&w.closed, workerEnqueueInit, workerEnqueueClosed)
+func bufferWorkerDequeueLoopSingle(ctx context.Context, queue *Queue, subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook, _ int) {
+	submit := createSubmitBuffer(subexec, handler, preHook, postHook)
+	bufferWorkerDequeueLoop(ctx, queue, submit, 0)
 }
 
-func (w *bufferWorker) isClosed() bool {
-	return atomic.LoadInt32(&w.closed) == workerEnqueueClosed
-}
-
-// enqueue parameter w/ non-blocking until capacity
-func (w *bufferWorker) Enqueue(param interface{}) bool {
-	if w.isClosed() {
-		// collect queue that queue closed
-		w.opt.abortQueueHandler(param)
-		return false
-	}
-	return w.queue.Enqueue(param)
-}
-
-// execute handler from queue
-func (w *bufferWorker) exec(parameters []interface{}, done func()) {
-	defer done()
-
-	w.opt.preHook()
-	for _, param := range parameters {
-		w.handler(param)
-	}
-	w.opt.postHook()
-}
-
-func (w *bufferWorker) submitBuffer(parameters []interface{}, done func()) {
-	w.subexec.Submit(func() {
-		w.exec(parameters, done)
-	})
-}
-
-func (w *bufferWorker) runloop() {
+// finalizer safe loop
+func bufferWorkerDequeueLoop(ctx context.Context, queue *Queue, submitBuffer bufferWorkerSubmitBufferFunc, maxDequeueSize int) {
 	running := int32(0)
 
 	deq := NewQueue(1, QueuePanicHandler(noopPanicHandler))
@@ -411,21 +503,20 @@ func (w *bufferWorker) runloop() {
 		}
 
 		if 0 < len(buffer) {
-			w.submitBuffer(buffer, bufferExecNoopDone)
+			submitBuffer(buffer, bufferExecNoopDone)
 		}
-		w.cancel() // ensure release
 	}()
 
 	readMulti := false
-	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
+	if 0 < maxDequeueSize {
 		readMulti = true
 	}
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-ctx.Done():
 			return
 
-		case param, ok := <-w.queue.Chan():
+		case param, ok := <-queue.Chan():
 			if ok != true {
 				return
 			}
@@ -439,12 +530,12 @@ func (w *bufferWorker) runloop() {
 			run := true
 			for run {
 				select {
-				case p, succ := <-w.queue.Chan():
+				case p, succ := <-queue.Chan():
 					if succ != true {
 						run = false
 					} else {
 						buffer = append(buffer, p)
-						if w.opt.maxDequeueSize <= len(buffer) {
+						if maxDequeueSize <= len(buffer) {
 							run = false
 						}
 					}
@@ -467,7 +558,7 @@ func (w *bufferWorker) runloop() {
 			copy(queue, buffer)
 			buffer = buffer[len(buffer):]
 
-			w.submitBuffer(queue, func() {
+			submitBuffer(queue, func() {
 				atomic.StoreInt32(&running, 0)
 				deq.EnqueueNB(struct{}{}) // dequeue remain buffer
 			})
