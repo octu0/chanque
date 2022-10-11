@@ -3,6 +3,8 @@ package chanque
 import (
 	"fmt"
 	"math/rand"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -632,5 +634,97 @@ func TestWorkerDequeue(t *testing.T) {
 				tt.Errorf("v[%d] expect %s actual %s", i, expect[i], values[i])
 			}
 		}
+	})
+}
+
+func TestWorkerFinalizer(t *testing.T) {
+	t.Run("default", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		if e.Running() != 0 {
+			tt.Errorf("initial")
+		}
+
+		w := NewDefaultWorker(func(param interface{}) {
+			tt.Logf("param = %+v", param)
+		}, WorkerExecutor(e))
+
+		ch := make(chan struct{})
+		runtime.SetFinalizer(w, nil)
+		runtime.SetFinalizer(w, func(me Worker) {
+			ch <- struct{}{}
+		})
+
+		w.Enqueue("test") // wait start worker
+
+		if e.Running() != 1 {
+			tt.Errorf("default worker running: %d", e.Running())
+		}
+
+		tt.Logf("call finalizer")
+		w = nil
+		runtime.GC()
+
+		select {
+		case <-ch:
+			tt.Logf("called worker finalize")
+		case <-time.After(1 * time.Second):
+			tt.Errorf("finalizer timeout")
+		}
+
+		if e.Running() != 0 {
+			tt.Logf("worker still running %s", debug.Stack())
+		}
+	})
+	t.Run("buffer", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		if e.Running() != 0 {
+			tt.Errorf("initial")
+		}
+
+		w := NewBufferWorker(func(param interface{}) {
+			tt.Logf("param = %+v", param)
+		}, WorkerExecutor(e))
+
+		ch := make(chan struct{})
+		runtime.SetFinalizer(w, nil)
+		runtime.SetFinalizer(w, func(me Worker) {
+			ch <- struct{}{}
+		})
+
+		w.Enqueue("test") // wait start worker
+
+		if e.Running() < 1 {
+			tt.Errorf("buffer worker running: %d", e.Running())
+		}
+
+		tt.Logf("call finalizer")
+		w = nil
+		runtime.GC()
+
+		select {
+		case <-ch:
+			tt.Logf("called worker finalize")
+		case <-time.After(1 * time.Second):
+			tt.Errorf("finalizer timeout")
+		}
+
+		if e.Running() != 0 {
+			tt.Logf("worker still running %s", debug.Stack())
+		}
+	})
+	t.Run("default/autoshutdown", func(tt *testing.T) {
+	})
+	t.Run("buffer/autoshutdown", func(tt *testing.T) {
+	})
+}
+
+func TestWorkerTimeout(t *testing.T) {
+	t.Run("default", func(tt *testing.T) {
+	})
+	t.Run("buffer", func(tt *testing.T) {
 	})
 }
