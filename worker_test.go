@@ -776,7 +776,59 @@ func TestWorkerFinalizer(t *testing.T) {
 
 func TestWorkerTimeout(t *testing.T) {
 	t.Run("default", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		if e.Running() != 0 {
+			tt.Errorf("initial")
+		}
+
+		w := NewDefaultWorker(func(param interface{}) {
+			tt.Logf("param = %+v", param)
+		}, WorkerExecutor(e), WorkerTimeout(300*time.Millisecond))
+
+		w.Enqueue("test") // wait start worker
+
+		if e.Running() != 1 {
+			tt.Errorf("default worker running: %d", e.Running())
+		}
+
+		time.Sleep(time.Second) // wait timeout
+
+		if e.Running() != 0 {
+			tt.Errorf("worker still running %s", debug.Stack())
+		}
+
+		if w.Enqueue("test2") {
+			tt.Errorf("worker queue closed")
+		}
 	})
 	t.Run("buffer", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		if e.Running() != 0 {
+			tt.Errorf("initial")
+		}
+
+		w := NewBufferWorker(func(param interface{}) {
+			tt.Logf("param = %+v", param)
+		}, WorkerExecutor(e), WorkerTimeout(300*time.Millisecond))
+
+		w.Enqueue("test") // wait start worker
+
+		if e.Running() < 1 {
+			tt.Errorf("buffer worker running: %d", e.Running())
+		}
+
+		time.Sleep(time.Second) // wait timeout
+
+		if e.Running() != 0 {
+			tt.Errorf("worker still running %s", debug.Stack())
+		}
+
+		if w.Enqueue("test2") {
+			tt.Errorf("worker queue closed")
+		}
 	})
 }

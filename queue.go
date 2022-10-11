@@ -1,7 +1,13 @@
 package chanque
 
 import (
+	"sync/atomic"
 	"time"
+)
+
+const (
+	queueInit int32 = iota
+	queueClosed
 )
 
 type QueueOptionFunc func(*optQueue)
@@ -19,6 +25,7 @@ func QueuePanicHandler(handler PanicHandler) QueueOptionFunc {
 type Queue struct {
 	ch           chan interface{}
 	panicHandler PanicHandler
+	closed       int32
 }
 
 func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
@@ -34,6 +41,7 @@ func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
 	return &Queue{
 		ch:           make(chan interface{}, c),
 		panicHandler: opt.panicHandler,
+		closed:       queueInit,
 	}
 }
 
@@ -49,6 +57,10 @@ func (q *Queue) Chan() <-chan interface{} {
 	return q.ch
 }
 
+func (q *Queue) Closed() bool {
+	return atomic.LoadInt32(&q.closed) == queueClosed
+}
+
 func (q *Queue) Close() (closed bool) {
 	defer func() {
 		if rcv := recover(); rcv != nil {
@@ -56,6 +68,11 @@ func (q *Queue) Close() (closed bool) {
 			closed = false
 		}
 	}()
+
+	if atomic.CompareAndSwapInt32(&q.closed, queueInit, queueClosed) != true {
+		closed = false
+		return
+	}
 
 	close(q.ch)
 	closed = true

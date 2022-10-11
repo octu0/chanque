@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	workerEnqueueInit int32 = iota
+	workerEnqueueClosed
+)
+
 type Worker interface {
 	Enqueue(interface{}) bool
 	CloseEnqueue() bool
@@ -63,6 +68,7 @@ type optWorker struct {
 	capacity          int
 	maxDequeueSize    int
 	autoShutdown      bool
+	timeout           time.Duration
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -119,14 +125,15 @@ func WorkerAutoShutdown(enable bool) WorkerOptionFunc {
 	}
 }
 
+func WorkerTimeout(timeout time.Duration) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.timeout = timeout
+	}
+}
+
 // compile check
 var (
 	_ Worker = (*defaultWorker)(nil)
-)
-
-const (
-	workerEnqueueInit   int32 = 0
-	workerEnqueueClosed int32 = 1
 )
 
 type defaultWorker struct {
@@ -173,16 +180,19 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &defaultWorker{
 		opt:     opt,
 		queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 		handler: handler,
 		closed:  workerEnqueueInit,
-		ctx:     ctx,
-		cancel:  cancel,
 		subexec: opt.executor.SubExecutor(),
 	}
+	if 0 < opt.timeout {
+		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
+	} else {
+		w.ctx, w.cancel = context.WithCancel(opt.ctx)
+	}
+
 	w.initWorker()
 	if opt.autoShutdown {
 		runtime.SetFinalizer(w, func(me *defaultWorker) {
@@ -202,7 +212,8 @@ func (w *defaultWorker) workerDequeueLoop() defaultWorkerDequeueLoopFunc {
 func (w *defaultWorker) initWorker() {
 	w.subexec.Submit(func(me *defaultWorker, dequeueLoop defaultWorkerDequeueLoopFunc) Job {
 		return func() {
-			dequeueLoop(me.ctx, me.queue, me.handler, me.opt.preHook, me.opt.postHook, w.opt.maxDequeueSize)
+			defer me.queue.Close()
+			dequeueLoop(me.ctx, me.queue, me.handler, me.opt.preHook, me.opt.postHook, me.opt.maxDequeueSize)
 		}
 	}(w, w.workerDequeueLoop()))
 }
@@ -235,7 +246,13 @@ func (w *defaultWorker) tryQueueClose() bool {
 }
 
 func (w *defaultWorker) isClosed() bool {
-	return atomic.LoadInt32(&w.closed) == workerEnqueueClosed
+	if atomic.LoadInt32(&w.closed) == workerEnqueueClosed {
+		return true
+	}
+	if w.queue.Closed() {
+		return true
+	}
+	return false
 }
 
 // enqueue parameter w/ blocking until handler running
@@ -353,17 +370,19 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(opt.ctx)
 	w := &bufferWorker{
 		defaultWorker: &defaultWorker{
 			opt:     opt,
 			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
 			handler: handler,
 			closed:  workerEnqueueInit,
-			ctx:     ctx,
-			cancel:  cancel,
 			subexec: opt.executor.SubExecutor(),
 		},
+	}
+	if 0 < opt.timeout {
+		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
+	} else {
+		w.ctx, w.cancel = context.WithCancel(opt.ctx)
 	}
 
 	w.initWorker()
@@ -386,7 +405,8 @@ func (w *bufferWorker) workerDequeueLoop() bufferWorkerDequeueLoopFunc {
 func (w *bufferWorker) initWorker() {
 	w.subexec.Submit(func(me *bufferWorker, dequeueLoop bufferWorkerDequeueLoopFunc) Job {
 		return func() {
-			dequeueLoop(me.ctx, me.queue, me.subexec, w.handler, w.opt.preHook, w.opt.postHook, w.opt.maxDequeueSize)
+			defer me.queue.Close()
+			dequeueLoop(me.ctx, me.queue, me.subexec, me.handler, me.opt.preHook, me.opt.postHook, me.opt.maxDequeueSize)
 		}
 	}(w, w.workerDequeueLoop()))
 }
@@ -419,7 +439,13 @@ func (w *bufferWorker) tryQueueClose() bool {
 }
 
 func (w *bufferWorker) isClosed() bool {
-	return atomic.LoadInt32(&w.closed) == workerEnqueueClosed
+	if atomic.LoadInt32(&w.closed) == workerEnqueueClosed {
+		return true
+	}
+	if w.queue.Closed() {
+		return true
+	}
+	return false
 }
 
 // enqueue parameter w/ non-blocking until capacity
@@ -454,7 +480,7 @@ func bufferWorkerDequeueLoopMulti(ctx context.Context, queue *Queue, subexec *Su
 	bufferWorkerDequeueLoop(ctx, queue, submit, maxDequeueSize)
 }
 
-func bufferWorkerDequeueLoopSingle(ctx context.Context, queue *Queue, subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook, maxDequeueSize int) {
+func bufferWorkerDequeueLoopSingle(ctx context.Context, queue *Queue, subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook, _ int) {
 	submit := createSubmitBuffer(subexec, handler, preHook, postHook)
 	bufferWorkerDequeueLoop(ctx, queue, submit, 0)
 }
