@@ -19,6 +19,36 @@ const (
 	maxInt64 = int(math.MaxInt64)
 )
 
+const (
+	defaultRetryBackoffIntervalMin time.Duration = 300 * time.Millisecond
+	defaultRetryBackoffIntervalMax time.Duration = 60 * time.Second
+	defaultRetryMaxRetry           int           = 10
+)
+
+type RetryNext uint8
+
+const (
+	RetryNextContinue RetryNext = iota + 1
+	RetryNextBreak
+)
+
+type (
+	RetryFunc         func(context.Context) (interface{}, error)
+	RetryErrorHandler func(err error, b *Backoff) RetryNext
+)
+
+func defaultRetryErrorHandler(err error, b *Backoff) RetryNext {
+	if err != nil {
+		return RetryNextContinue
+	}
+	return RetryNextBreak
+}
+
+var (
+	ErrRetryNotComplete    = errors.New("RetryFuture retry not complete")
+	ErrRetryContextTimeout = errors.New("Retry context timeout or canceled")
+)
+
 var (
 	RetryRand *rand.Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
@@ -38,33 +68,6 @@ type Backoff struct {
 	max     time.Duration
 	jitter  bool
 	attempt uint64
-}
-
-func NewBackoff(min, max time.Duration) *Backoff {
-	return newBackoff(min, max, true)
-}
-
-func NewBackoffNoJitter(min, max time.Duration) *Backoff {
-	return newBackoff(min, max, false)
-}
-
-func newBackoff(min, max time.Duration, useJitter bool) *Backoff {
-	if min < 1 {
-		min = 1
-	}
-	if max < 1 {
-		max = 1
-	}
-	if max < min {
-		max = min
-	}
-
-	return &Backoff{
-		min:     min,
-		max:     max,
-		jitter:  useJitter,
-		attempt: 0,
-	}
 }
 
 func (b *Backoff) Next() time.Duration {
@@ -105,29 +108,31 @@ func (b *Backoff) currentAttempt() uint64 {
 	return atomic.LoadUint64(&b.attempt)
 }
 
-const (
-	defaultRetryBackoffIntervalMin time.Duration = 300 * time.Millisecond
-	defaultRetryBackoffIntervalMax time.Duration = 60 * time.Second
-	defaultRetryMaxRetry           int           = 10
-)
+func NewBackoff(min, max time.Duration) *Backoff {
+	return newBackoff(min, max, true)
+}
 
-type RetryNext uint8
+func NewBackoffNoJitter(min, max time.Duration) *Backoff {
+	return newBackoff(min, max, false)
+}
 
-const (
-	RetryNextContinue RetryNext = iota + 1
-	RetryNextBreak
-)
-
-type (
-	RetryFunc         func(context.Context) (interface{}, error)
-	RetryErrorHandler func(err error, b *Backoff) RetryNext
-)
-
-func defaultErrorHandler(err error, b *Backoff) RetryNext {
-	if err != nil {
-		return RetryNextContinue
+func newBackoff(min, max time.Duration, useJitter bool) *Backoff {
+	if min < 1 {
+		min = 1
 	}
-	return RetryNextBreak
+	if max < 1 {
+		max = 1
+	}
+	if max < min {
+		max = min
+	}
+
+	return &Backoff{
+		min:     min,
+		max:     max,
+		jitter:  useJitter,
+		attempt: 0,
+	}
 }
 
 type RetryOptionFunc func(*optRetry)
@@ -170,16 +175,21 @@ func RetryBackoffUseJitter(useJitter bool) RetryOptionFunc {
 	}
 }
 
-var (
-	ErrRetryNotComplete    = errors.New("RetryFuture retry not complete")
-	ErrRetryContextTimeout = errors.New("Retry context timeout or canceled")
-)
-
 type Retry struct {
 	executor *Executor
 	backoff  *Backoff
 	ctx      context.Context
 	maxRetry int
+}
+
+func (r *Retry) Retry(fn RetryFunc) *RetryFuture {
+	return r.RetryWithErrorHandler(fn, defaultRetryErrorHandler)
+}
+
+func (r *Retry) RetryWithErrorHandler(fn RetryFunc, eh RetryErrorHandler) *RetryFuture {
+	f := newRetryFuture(r.ctx, r.executor)
+	f.retry(r.backoff, r.maxRetry, fn, eh)
+	return f
 }
 
 func NewRetry(executor *Executor, funcs ...RetryOptionFunc) *Retry {
@@ -221,30 +231,11 @@ func newRetry(executor *Executor, backoff *Backoff, funcs ...RetryOptionFunc) *R
 	}
 }
 
-func (r *Retry) Retry(fn RetryFunc) *RetryFuture {
-	return r.RetryWithErrorHandler(fn, defaultErrorHandler)
-}
-
-func (r *Retry) RetryWithErrorHandler(fn RetryFunc, eh RetryErrorHandler) *RetryFuture {
-	f := newRetryFuture(r.ctx, r.executor)
-	f.retry(r.backoff, r.maxRetry, fn, eh)
-	return f
-}
-
 type RetryFuture struct {
 	once    *sync.Once
 	ctx     context.Context
 	subExec *SubExecutor
 	result  ValueError
-}
-
-func newRetryFuture(ctx context.Context, executor *Executor) *RetryFuture {
-	return &RetryFuture{
-		once:    new(sync.Once),
-		ctx:     ctx,
-		subExec: executor.SubExecutor(),
-		result:  &tupleValueError{value: nil, err: ErrRetryNotComplete},
-	}
 }
 
 func (f *RetryFuture) retry(b *Backoff, maxRetry int, fn RetryFunc, eh RetryErrorHandler) {
@@ -292,4 +283,13 @@ func (f *RetryFuture) Result() ValueError {
 		f.subExec.Wait()
 	})
 	return f.result
+}
+
+func newRetryFuture(ctx context.Context, executor *Executor) *RetryFuture {
+	return &RetryFuture{
+		once:    new(sync.Once),
+		ctx:     ctx,
+		subExec: executor.SubExecutor(),
+		result:  &tupleValueError{value: nil, err: ErrRetryNotComplete},
+	}
 }

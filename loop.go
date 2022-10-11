@@ -220,24 +220,6 @@ type Loop struct {
 	mux    *loopMux
 }
 
-func NewLoop(e *Executor, funcs ...LoopOptionFunc) *Loop {
-	opt := new(optLoop)
-	for _, fn := range funcs {
-		fn(opt)
-	}
-	if opt.ctx == nil {
-		opt.ctx = context.Background()
-	}
-
-	return &Loop{
-		mutex:  new(sync.Mutex),
-		ctx:    opt.ctx,
-		cancel: nil,
-		exec:   e.SubExecutor(),
-		mux:    new(loopMux),
-	}
-}
-
 func (lo *Loop) Stop() {
 	lo.mutex.Lock()
 	defer lo.mutex.Unlock()
@@ -294,4 +276,22 @@ func (lo *Loop) ExecuteTimeout(timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(lo.ctx, timeout)
 	lo.cancel = cancel
 	lo.exec.Submit(lo.mux.loopJob(ctx))
+}
+
+func NewLoop(e *Executor, funcs ...LoopOptionFunc) *Loop {
+	opt := new(optLoop)
+	for _, fn := range funcs {
+		fn(opt)
+	}
+	if opt.ctx == nil {
+		opt.ctx = context.Background()
+	}
+
+	return &Loop{
+		mutex:  new(sync.Mutex),
+		ctx:    opt.ctx,
+		cancel: nil,
+		exec:   e.SubExecutor(),
+		mux:    new(loopMux),
+	}
 }

@@ -28,23 +28,6 @@ type Queue struct {
 	closed       int32
 }
 
-func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
-	opt := new(optQueue)
-	for _, fn := range funcs {
-		fn(opt)
-	}
-
-	if opt.panicHandler == nil {
-		opt.panicHandler = defaultPanicHandler
-	}
-
-	return &Queue{
-		ch:           make(chan interface{}, c),
-		panicHandler: opt.panicHandler,
-		closed:       queueInit,
-	}
-}
-
 func (q *Queue) Len() int {
 	return len(q.ch)
 }
@@ -160,4 +143,21 @@ func (q *Queue) DequeueRetry(retryInterval time.Duration, retryLimit int) (val i
 	}
 	val, found = nil, false
 	return
+}
+
+func NewQueue(c int, funcs ...QueueOptionFunc) *Queue {
+	opt := new(optQueue)
+	for _, fn := range funcs {
+		fn(opt)
+	}
+
+	if opt.panicHandler == nil {
+		opt.panicHandler = defaultPanicHandler
+	}
+
+	return &Queue{
+		ch:           make(chan interface{}, c),
+		panicHandler: opt.panicHandler,
+		closed:       queueInit,
+	}
 }

@@ -35,6 +35,25 @@ type Parallel struct {
 	executor    *Executor
 }
 
+func (p *Parallel) Queue(fn ParallelJob) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	p.queue = append(p.queue, fn)
+}
+
+func (p *Parallel) Submit() *ParallelFuture {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	future := newParallelFuture(p.ctx, p.executor)
+	for _, chunk := range chunk(p.queue, p.parallelism) {
+		future.add(chunk)
+	}
+	p.queue = p.queue[len(p.queue):]
+	return future
+}
+
 func NewParallel(e *Executor, funcs ...ParallelOptionFunc) *Parallel {
 	opt := new(optParallel)
 	for _, fn := range funcs {
@@ -57,35 +76,9 @@ func NewParallel(e *Executor, funcs ...ParallelOptionFunc) *Parallel {
 	}
 }
 
-func (p *Parallel) Queue(fn ParallelJob) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	p.queue = append(p.queue, fn)
-}
-
-func (p *Parallel) Submit() *ParallelFuture {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	future := newParallelFuture(p.ctx, p.executor)
-	for _, chunk := range chunk(p.queue, p.parallelism) {
-		future.add(chunk)
-	}
-	p.queue = p.queue[len(p.queue):]
-	return future
-}
-
 type ParallelFutureResult struct {
 	mutex   *sync.Mutex
 	results []ValueError
-}
-
-func newParallelFutureResult() *ParallelFutureResult {
-	return &ParallelFutureResult{
-		mutex:   new(sync.Mutex),
-		results: make([]ValueError, 0),
-	}
 }
 
 func (r *ParallelFutureResult) add(re ValueError) {
@@ -99,12 +92,30 @@ func (r *ParallelFutureResult) Results() []ValueError {
 	return r.results
 }
 
+func newParallelFutureResult() *ParallelFutureResult {
+	return &ParallelFutureResult{
+		mutex:   new(sync.Mutex),
+		results: make([]ValueError, 0),
+	}
+}
+
 type ParallelFuture struct {
 	once     *sync.Once
 	ctx      context.Context
 	executor *Executor
 	result   *ParallelFutureResult
 	worker   Worker
+}
+
+func (f *ParallelFuture) add(jobs []ParallelJob) {
+	f.worker.Enqueue(jobs)
+}
+
+func (f *ParallelFuture) Result() []ValueError {
+	f.once.Do(func() {
+		f.worker.ShutdownAndWait()
+	})
+	return f.result.Results()
 }
 
 func newParallelFuture(ctx context.Context, executor *Executor) *ParallelFuture {
@@ -120,17 +131,6 @@ func newParallelFuture(ctx context.Context, executor *Executor) *ParallelFuture 
 			WorkerExecutor(executor),
 		),
 	}
-}
-
-func (f *ParallelFuture) add(jobs []ParallelJob) {
-	f.worker.Enqueue(jobs)
-}
-
-func (f *ParallelFuture) Result() []ValueError {
-	f.once.Do(func() {
-		f.worker.ShutdownAndWait()
-	})
-	return f.result.Results()
 }
 
 func runParallelFutureJob(job ParallelJob, pr *ParallelFutureResult) Job {

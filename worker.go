@@ -146,62 +146,6 @@ type defaultWorker struct {
 	subexec *SubExecutor
 }
 
-// run background
-func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
-	opt := new(optWorker)
-	for _, fn := range funcs {
-		fn(opt)
-	}
-	if opt.ctx == nil {
-		opt.ctx = context.Background()
-	}
-	if opt.panicHandler == nil {
-		opt.panicHandler = defaultPanicHandler
-	}
-	if opt.preHook == nil {
-		opt.preHook = noopWorkerHook
-	}
-	if opt.postHook == nil {
-		opt.postHook = noopWorkerHook
-	}
-	if opt.abortQueueHandler == nil {
-		opt.abortQueueHandler = noopAbortQueueHandler
-	}
-	if opt.executor == nil {
-		opt.executor = NewExecutor(1, 1)
-	}
-	if opt.capacity < 1 {
-		opt.capacity = 0
-	}
-
-	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
-		if opt.capacity < opt.maxDequeueSize {
-			opt.maxDequeueSize = opt.capacity
-		}
-	}
-
-	w := &defaultWorker{
-		opt:     opt,
-		queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
-		handler: handler,
-		closed:  workerEnqueueInit,
-		subexec: opt.executor.SubExecutor(),
-	}
-	if 0 < opt.timeout {
-		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
-	} else {
-		w.ctx, w.cancel = context.WithCancel(opt.ctx)
-	}
-
-	w.initWorker()
-	if opt.autoShutdown {
-		runtime.SetFinalizer(w, func(me *defaultWorker) {
-			me.Shutdown()
-		})
-	}
-	return w
-}
-
 func (w *defaultWorker) workerDequeueLoop() defaultWorkerDequeueLoopFunc {
 	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
 		return defaultWorkerDequeueLoopMulti
@@ -263,6 +207,61 @@ func (w *defaultWorker) Enqueue(param interface{}) bool {
 		return false
 	}
 	return w.queue.Enqueue(param)
+}
+
+func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
+	opt := new(optWorker)
+	for _, fn := range funcs {
+		fn(opt)
+	}
+	if opt.ctx == nil {
+		opt.ctx = context.Background()
+	}
+	if opt.panicHandler == nil {
+		opt.panicHandler = defaultPanicHandler
+	}
+	if opt.preHook == nil {
+		opt.preHook = noopWorkerHook
+	}
+	if opt.postHook == nil {
+		opt.postHook = noopWorkerHook
+	}
+	if opt.abortQueueHandler == nil {
+		opt.abortQueueHandler = noopAbortQueueHandler
+	}
+	if opt.executor == nil {
+		opt.executor = NewExecutor(1, 1)
+	}
+	if opt.capacity < 1 {
+		opt.capacity = 0
+	}
+
+	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
+		if opt.capacity < opt.maxDequeueSize {
+			opt.maxDequeueSize = opt.capacity
+		}
+	}
+
+	w := &defaultWorker{
+		opt:     opt,
+		queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
+		handler: handler,
+		closed:  workerEnqueueInit,
+		subexec: opt.executor.SubExecutor(),
+	}
+	if 0 < opt.timeout {
+		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
+	} else {
+		w.ctx, w.cancel = context.WithCancel(opt.ctx)
+	}
+
+	w.initWorker()
+	if opt.autoShutdown {
+		runtime.SetFinalizer(w, func(me *defaultWorker) {
+			me.Shutdown()
+		})
+	}
+	return w
 }
 
 // finalizer safe loop
@@ -340,60 +339,6 @@ type bufferWorker struct {
 	*defaultWorker
 }
 
-func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
-	opt := new(optWorker)
-	for _, fn := range funcs {
-		fn(opt)
-	}
-	if opt.ctx == nil {
-		opt.ctx = context.Background()
-	}
-	if opt.panicHandler == nil {
-		opt.panicHandler = defaultPanicHandler
-	}
-	if opt.preHook == nil {
-		opt.preHook = noopWorkerHook
-	}
-	if opt.postHook == nil {
-		opt.postHook = noopWorkerHook
-	}
-	if opt.abortQueueHandler == nil {
-		opt.abortQueueHandler = noopAbortQueueHandler
-	}
-	if opt.executor == nil {
-		opt.executor = NewExecutor(2, 2) // checker + dequeue
-	}
-
-	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
-		if opt.capacity < opt.maxDequeueSize {
-			opt.maxDequeueSize = opt.capacity
-		}
-	}
-
-	w := &bufferWorker{
-		defaultWorker: &defaultWorker{
-			opt:     opt,
-			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
-			handler: handler,
-			closed:  workerEnqueueInit,
-			subexec: opt.executor.SubExecutor(),
-		},
-	}
-	if 0 < opt.timeout {
-		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
-	} else {
-		w.ctx, w.cancel = context.WithCancel(opt.ctx)
-	}
-
-	w.initWorker()
-	if opt.autoShutdown {
-		runtime.SetFinalizer(w, func(me *bufferWorker) {
-			me.Shutdown()
-		})
-	}
-	return w
-}
-
 func (w *bufferWorker) workerDequeueLoop() bufferWorkerDequeueLoopFunc {
 	if 0 < w.opt.capacity && 0 < w.opt.maxDequeueSize {
 		return bufferWorkerDequeueLoopMulti
@@ -456,6 +401,60 @@ func (w *bufferWorker) Enqueue(param interface{}) bool {
 		return false
 	}
 	return w.queue.Enqueue(param)
+}
+
+func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
+	opt := new(optWorker)
+	for _, fn := range funcs {
+		fn(opt)
+	}
+	if opt.ctx == nil {
+		opt.ctx = context.Background()
+	}
+	if opt.panicHandler == nil {
+		opt.panicHandler = defaultPanicHandler
+	}
+	if opt.preHook == nil {
+		opt.preHook = noopWorkerHook
+	}
+	if opt.postHook == nil {
+		opt.postHook = noopWorkerHook
+	}
+	if opt.abortQueueHandler == nil {
+		opt.abortQueueHandler = noopAbortQueueHandler
+	}
+	if opt.executor == nil {
+		opt.executor = NewExecutor(2, 2) // checker + dequeue
+	}
+
+	if 0 < opt.capacity && 0 < opt.maxDequeueSize {
+		if opt.capacity < opt.maxDequeueSize {
+			opt.maxDequeueSize = opt.capacity
+		}
+	}
+
+	w := &bufferWorker{
+		defaultWorker: &defaultWorker{
+			opt:     opt,
+			queue:   NewQueue(opt.capacity, QueuePanicHandler(opt.panicHandler)),
+			handler: handler,
+			closed:  workerEnqueueInit,
+			subexec: opt.executor.SubExecutor(),
+		},
+	}
+	if 0 < opt.timeout {
+		w.ctx, w.cancel = context.WithTimeout(opt.ctx, opt.timeout)
+	} else {
+		w.ctx, w.cancel = context.WithCancel(opt.ctx)
+	}
+
+	w.initWorker()
+	if opt.autoShutdown {
+		runtime.SetFinalizer(w, func(me *bufferWorker) {
+			me.Shutdown()
+		})
+	}
+	return w
 }
 
 func createSubmitBuffer(subexec *SubExecutor, handler WorkerHandler, preHook, postHook WorkerHook) bufferWorkerSubmitBufferFunc {
