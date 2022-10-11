@@ -2,6 +2,7 @@ package chanque
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"time"
 )
@@ -61,6 +62,7 @@ type optWorker struct {
 	executor          *Executor
 	capacity          int
 	maxDequeueSize    int
+	autoShutdown      bool
 }
 
 func WorkerContext(ctx context.Context) WorkerOptionFunc {
@@ -108,6 +110,12 @@ func WorkerCapacity(capacity int) WorkerOptionFunc {
 func WorkerMaxDequeueSize(size int) WorkerOptionFunc {
 	return func(opt *optWorker) {
 		opt.maxDequeueSize = size
+	}
+}
+
+func WorkerAutoShutdown(enable bool) WorkerOptionFunc {
+	return func(opt *optWorker) {
+		opt.autoShutdown = enable
 	}
 }
 
@@ -176,6 +184,11 @@ func NewDefaultWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 		subexec: opt.executor.SubExecutor(),
 	}
 	w.initWorker()
+	if opt.autoShutdown {
+		runtime.SetFinalizer(w, func(me *defaultWorker) {
+			me.Shutdown()
+		})
+	}
 	return w
 }
 
@@ -354,6 +367,11 @@ func NewBufferWorker(handler WorkerHandler, funcs ...WorkerOptionFunc) Worker {
 	}
 
 	w.initWorker()
+	if opt.autoShutdown {
+		runtime.SetFinalizer(w, func(me *bufferWorker) {
+			me.Shutdown()
+		})
+	}
 	return w
 }
 

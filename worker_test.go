@@ -674,7 +674,7 @@ func TestWorkerFinalizer(t *testing.T) {
 		}
 
 		if e.Running() != 0 {
-			tt.Logf("worker still running %s", debug.Stack())
+			tt.Logf("[ok] worker still running %s", debug.Stack())
 		}
 	})
 	t.Run("buffer", func(tt *testing.T) {
@@ -713,12 +713,64 @@ func TestWorkerFinalizer(t *testing.T) {
 		}
 
 		if e.Running() != 0 {
-			tt.Logf("worker still running %s", debug.Stack())
+			tt.Logf("[ok] worker still running %s", debug.Stack())
 		}
 	})
 	t.Run("default/autoshutdown", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		if e.Running() != 0 {
+			tt.Errorf("initial")
+		}
+
+		w := NewDefaultWorker(func(param interface{}) {
+			tt.Logf("param = %+v", param)
+		}, WorkerExecutor(e), WorkerAutoShutdown(true))
+
+		w.Enqueue("test") // wait start worker
+
+		if e.Running() != 1 {
+			tt.Errorf("default worker running: %d", e.Running())
+		}
+
+		tt.Logf("call finalizer")
+		w = nil
+		runtime.GC()
+
+		time.Sleep(time.Second)
+
+		if e.Running() != 0 {
+			tt.Errorf("worker still running %s", debug.Stack())
+		}
 	})
 	t.Run("buffer/autoshutdown", func(tt *testing.T) {
+		e := NewExecutor(10, 10)
+		defer e.Release()
+
+		if e.Running() != 0 {
+			tt.Errorf("initial")
+		}
+
+		w := NewBufferWorker(func(param interface{}) {
+			tt.Logf("param = %+v", param)
+		}, WorkerExecutor(e), WorkerAutoShutdown(true))
+
+		w.Enqueue("test") // wait start worker
+
+		if e.Running() < 1 {
+			tt.Errorf("buffer worker running: %d", e.Running())
+		}
+
+		tt.Logf("call finalizer")
+		w = nil
+		runtime.GC()
+
+		time.Sleep(time.Second)
+
+		if e.Running() != 0 {
+			tt.Errorf("worker still running %s", debug.Stack())
+		}
 	})
 }
 
