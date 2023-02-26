@@ -8,13 +8,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/rogpeppe/fastuuid"
 )
 
 const (
 	defaultReducerInterval = 10 * time.Second
 )
-
-type Job func()
 
 type ExecutorOptionFunc func(*optExecutor)
 
@@ -56,59 +56,76 @@ func ExecutorCollectStacktrace(enable bool) ExecutorOptionFunc {
 	}
 }
 
+type Job func()
+
 type executeJob struct {
 	job              Job
 	stacktraceID     uint64
 	removeStacktrace bool
 }
 
-type Executor struct {
-	mutex             *sync.RWMutex
-	wg                *sync.WaitGroup
-	jobs              *Queue
-	ctx               context.Context
-	jobCancel         []context.CancelFunc
-	healthCancel      context.CancelFunc
-	minWorker         int
-	maxWorker         int
-	panicHandler      PanicHandler
-	reducerInterval   time.Duration
-	runningNum        int32
-	workerNum         int32
-	collectStacktrace bool
-	stacktraces       map[uint64][]byte
+type cancelWorker struct {
+	workerID string
+	cancel   context.CancelFunc
 }
 
-func (e *Executor) initWorker() {
+type Executor struct {
+	mutex               *sync.RWMutex
+	wg                  *sync.WaitGroup
+	ctx                 context.Context
+	uuidGen             *fastuuid.Generator
+	jobs                *Queue // chan *executeJob
+	workerCancel        *Queue // chan *cancelWorker
+	workerDone          *Queue // chan string(cancelID)
+	workerRelease       *Queue // chan int(numOfReleaseWorkers)
+	workerCancelAllFunc context.CancelFunc
+	healthCancel        context.CancelFunc
+	minWorker           int
+	maxWorker           int
+	panicHandler        PanicHandler
+	reducerInterval     time.Duration
+	runningNum          int32
+	workerNum           int32
+	collectStacktrace   bool
+	stacktraces         map[uint64][]byte
+}
+
+func (e *Executor) initWorker(ctx context.Context) {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 
-	e.goExecLoop(e.minWorker)
+	workerCancelAllCtx, workerCancelAllFunc := context.WithCancel(ctx)
+	e.workerCancelAllFunc = workerCancelAllFunc
 
-	hctx, hcancel := context.WithCancel(e.ctx)
+	hctx, hcancel := context.WithCancel(ctx)
 	e.healthCancel = hcancel
 
 	e.wg.Add(1)
-	go e.healthloop(hctx)
+	go e.workerCancelQueueLoop(workerCancelAllCtx, e.workerCancel, e.workerDone, e.workerRelease)
+
+	e.wg.Add(1)
+	go e.healthloop(hctx, e.workerRelease)
+
+	e.goExecLoopLocked(ctx, e.minWorker, e.workerCancel)
 }
 
-func (e *Executor) goExecLoop(num int) {
+func (e *Executor) goExecLoopLocked(ctx context.Context, num int, workerCancel *Queue) {
 	if num < 1 {
 		return
 	}
 
 	for i := 0; i < num; i += 1 {
-		jctx, jcancel := context.WithCancel(e.ctx)
-		e.jobCancel = append(e.jobCancel, jcancel)
+		workerCtx, workerCancelFunc := context.WithCancel(ctx)
+		workerID := e.uuidGen.Hex128()
+		workerCancel.Enqueue(&cancelWorker{
+			workerID: workerID,
+			cancel:   workerCancelFunc,
+		})
 
 		e.wg.Add(1)
 		e.increWorker()
-		go e.execloop(jctx, e.jobs)
+		go e.execloop(workerCtx, workerID, e.jobs, e.workerDone)
 	}
-}
-
-func (e *Executor) callPanicHandler(pt PanicType, rcv interface{}) {
-	e.panicHandler(pt, rcv)
 }
 
 func (e *Executor) MinWorker() int {
@@ -134,7 +151,7 @@ func (e *Executor) TuneMinWorker(nextMinWorker int) {
 		currentWorkers := int(e.Workers())
 		if currentWorkers < nextMinWorker {
 			diff := nextMinWorker - currentWorkers
-			e.goExecLoop(diff)
+			e.goExecLoopLocked(e.ctx, diff, e.workerCancel)
 		}
 	}
 
@@ -181,7 +198,7 @@ func (e *Executor) Workers() int32 {
 	return atomic.LoadInt32(&e.workerNum)
 }
 
-func (e *Executor) startOndemand() {
+func (e *Executor) startOndemandLocked() {
 	running := e.Running()
 	workerSize := e.Workers()
 	nextSize := running + 1
@@ -195,9 +212,9 @@ func (e *Executor) startOndemand() {
 		if needToWorkerSize < 1 {
 			needToWorkerSize = 1
 		}
-		e.goExecLoop(needToWorkerSize)
+		e.goExecLoopLocked(e.ctx, needToWorkerSize, e.workerCancel)
 	case workerSize == nextSize:
-		e.goExecLoop(1)
+		e.goExecLoopLocked(e.ctx, 1, e.workerCancel)
 	}
 }
 
@@ -209,12 +226,12 @@ func (e *Executor) Submit(fn Job) {
 
 	defer func() {
 		if rcv := recover(); rcv != nil {
-			e.callPanicHandler(PanicTypeEnqueue, rcv)
+			e.panicHandler(PanicTypeEnqueue, rcv)
 		}
 	}()
 
 	e.mutex.Lock()
-	e.startOndemand()
+	e.startOndemandLocked()
 	e.mutex.Unlock()
 
 	if e.collectStacktrace {
@@ -239,22 +256,19 @@ func (e *Executor) ForceStop() {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 
-	for _, cancel := range e.jobCancel {
-		cancel()
-	}
-	e.jobCancel = e.jobCancel[len(e.jobCancel):]
+	e.workerCancelAllFunc()
 }
 
 // release goroutines
 func (e *Executor) Release() {
 	defer func() {
 		if rcv := recover(); rcv != nil {
-			e.callPanicHandler(PanicTypeClose, rcv)
+			e.panicHandler(PanicTypeClose, rcv)
 		}
 	}()
 
+	e.workerCancelAllFunc()
 	e.healthCancel()
-	e.jobs.Close()
 }
 
 func (e *Executor) ReleaseAndWait() {
@@ -262,28 +276,68 @@ func (e *Executor) ReleaseAndWait() {
 	e.wg.Wait()
 }
 
-func (e *Executor) releaseJob(reduceSize int) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-
-	if reduceSize < 1 {
-		return
-	}
-
-	cancels := make([]context.CancelFunc, reduceSize)
-	copy(cancels, e.jobCancel[0:reduceSize])
-	e.jobCancel = e.jobCancel[reduceSize:]
-
-	for _, cancel := range cancels {
-		cancel()
-	}
-}
-
-func (e *Executor) healthloop(ctx context.Context) {
+func (e *Executor) workerCancelQueueLoop(ctx context.Context, workerCancel, workerDone, workerRelease *Queue) {
 	defer e.wg.Done()
 	defer func() {
 		if rcv := recover(); rcv != nil {
-			e.callPanicHandler(PanicTypeEnqueue, rcv)
+			e.panicHandler(PanicTypeEnqueue, rcv)
+		}
+	}()
+
+	workerCancels := make(map[string]context.CancelFunc, e.minWorker)
+	defer func() {
+		for _, cancel := range workerCancels {
+			cancel()
+		}
+	}()
+
+	release := func(releaseNum int) {
+		if len(workerCancels) < releaseNum {
+			releaseNum = len(workerCancels)
+		}
+		e.mutex.RLock()
+		minWorker := e.minWorker
+		defer e.mutex.RUnlock()
+
+		count := 0
+		for id, cancel := range workerCancels {
+			if len(workerCancels) <= minWorker {
+				return
+			}
+			if releaseNum <= count {
+				return
+			}
+			cancel()
+			delete(workerCancels, id)
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case cw := <-workerCancel.Chan():
+			w := cw.(*cancelWorker)
+			workerCancels[w.workerID] = w.cancel
+
+		case id := <-workerDone.Chan():
+			workerID := id.(string)
+			if cancel, ok := workerCancels[workerID]; ok {
+				cancel()
+				delete(workerCancels, workerID)
+			}
+		case rn := <-workerRelease.Chan():
+			releaseNum := rn.(int)
+			release(releaseNum)
+		}
+	}
+}
+
+func (e *Executor) healthloop(ctx context.Context, workerRelease *Queue) {
+	defer e.wg.Done()
+	defer func() {
+		if rcv := recover(); rcv != nil {
+			e.panicHandler(PanicTypeEnqueue, rcv)
 		}
 	}()
 
@@ -300,37 +354,37 @@ func (e *Executor) healthloop(ctx context.Context) {
 			runningWorkerNum := e.Running()
 			idleWorkers := int(currentWorkerNum - runningWorkerNum)
 			if e.minWorker < idleWorkers {
-				e.releaseJob(int(idleWorkers - e.minWorker))
+				workerRelease.Enqueue(int(idleWorkers - e.minWorker))
 			}
 		}
 	}
 }
 
-func (e *Executor) execloop(ctx context.Context, jobs *Queue) {
+func (e *Executor) execloop(ctx context.Context, workerID string, jobs, workerDone *Queue) {
 	defer e.wg.Done()
 	defer func() {
 		if rcv := recover(); rcv != nil {
-			e.callPanicHandler(PanicTypeDequeue, rcv)
+			e.panicHandler(PanicTypeDequeue, rcv)
 		}
 	}()
 	defer e.decreWorker()
+
+	defer workerDone.Enqueue(workerID)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case job, ok := <-jobs.Chan():
-			if ok != true {
-				return
-			}
-
+		case job := <-jobs.Chan():
 			e.increRunning()
 
-			if e.Running() <= e.Workers() {
+			if e.Workers() <= e.Running() {
 				// job added in a short interval will not be allocated,
 				// maybe when Worker has been in use for a long-term or Worker in blocking process.
-				e.startOndemand()
+				e.mutex.Lock()
+				e.startOndemandLocked()
+				e.mutex.Unlock()
 			}
 
 			exec := job.(*executeJob)
@@ -415,23 +469,27 @@ func NewExecutor(minWorker, maxWorker int, funcs ...ExecutorOptionFunc) *Executo
 	}
 
 	e := &Executor{
-		mutex:             new(sync.RWMutex),
-		wg:                new(sync.WaitGroup),
-		jobs:              NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler)),
-		ctx:               opt.ctx,
-		jobCancel:         make([]context.CancelFunc, 0),
-		healthCancel:      nil,
-		minWorker:         minWorker,
-		maxWorker:         maxWorker,
-		panicHandler:      opt.panicHandler,
-		reducerInterval:   opt.reducerInterval,
-		runningNum:        int32(0),
-		workerNum:         int32(0),
-		collectStacktrace: opt.collectStacktrace,
-		stacktraces:       make(map[uint64][]byte, stacktracesSize),
+		mutex:               new(sync.RWMutex),
+		wg:                  new(sync.WaitGroup),
+		ctx:                 opt.ctx,
+		uuidGen:             fastuuid.MustNewGenerator(),
+		jobs:                NewQueue(opt.maxCapacity, QueuePanicHandler(opt.panicHandler)),
+		workerCancel:        NewQueue(minWorker, QueuePanicHandler(opt.panicHandler)),
+		workerDone:          NewQueue(minWorker, QueuePanicHandler(opt.panicHandler)),
+		workerRelease:       NewQueue(0, QueuePanicHandler(opt.panicHandler)),
+		workerCancelAllFunc: nil,
+		healthCancel:        nil,
+		minWorker:           minWorker,
+		maxWorker:           maxWorker,
+		panicHandler:        opt.panicHandler,
+		reducerInterval:     opt.reducerInterval,
+		runningNum:          int32(0),
+		workerNum:           int32(0),
+		collectStacktrace:   opt.collectStacktrace,
+		stacktraces:         make(map[uint64][]byte, stacktracesSize),
 	}
 
-	e.initWorker()
+	e.initWorker(e.ctx)
 	return e
 }
 
