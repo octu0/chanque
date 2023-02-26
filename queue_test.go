@@ -2,6 +2,7 @@ package chanque
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -259,7 +260,7 @@ func TestRecoveryHandlerSendByClosedChannel(t *testing.T) {
 }
 
 func TestRecoveryHandlerWithDoubleClose(t *testing.T) {
-	qv := "not double close"
+	qv := int32(0)
 	qc := NewQueue(0,
 		QueuePanicHandler(func(pt PanicType, err interface{}) {
 			if pt != PanicTypeClose {
@@ -268,21 +269,21 @@ func TestRecoveryHandlerWithDoubleClose(t *testing.T) {
 			switch err.(type) {
 			case error:
 				// panic: close of closed channel
-				qv = "ok double close chan handling"
+				atomic.AddInt32(&qv, 1)
 			default:
-				qv = "not error type"
+				atomic.AddInt32(&qv, -10)
 			}
 		}),
 	)
 	qc.Close()
 	<-time.After(10 * time.Millisecond)
-	if qv != "not double close" {
+	if v := atomic.LoadInt32(&qv); v != 0 {
 		t.Errorf("1st close is ok")
 	}
 	qc.Close()
 	<-time.After(10 * time.Millisecond)
-	if qv != "ok double close chan handling" {
-		t.Errorf("PanicHandler does not call(2)")
+	if v := atomic.LoadInt32(&qv); v != 0 {
+		t.Errorf("PanicHandler does not call(once close):%d", v)
 	}
 }
 
