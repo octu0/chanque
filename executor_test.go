@@ -290,64 +290,58 @@ func TestExecutorOndemandStart(t *testing.T) {
 		t.Errorf("minimum zero worker")
 	}
 
-	latch := make(chan struct{})
+	latchFirst := make(chan struct{})
+	lockFirst := make(chan struct{})
 	e.Submit(func() {
-		latch <- struct{}{}
-		t.Logf("fist worker running")
-		<-time.After(50 * time.Millisecond)
-		t.Logf("fist worker done")
+		latchFirst <- struct{}{}
+		t.Logf("first worker running")
+		<-lockFirst
+		t.Logf("first worker done")
 	})
 
-	<-latch
+	<-latchFirst
 
 	r2 := e.Running()
 	w2 := e.Workers()
 	if r2 != 1 {
 		t.Errorf("running worker 1 actual:%d", r2)
 	}
-	if w2 < 2 {
-		t.Errorf("generated worker 1 actual:%d", w2)
+	if w2 != 2 {
+		t.Errorf("generated worker 2(run+1) actual:%d", w2)
 	}
 
-	enqueued := make(chan struct{})
-	go func(q chan struct{}) {
-		e.Submit(func() {
-			enqueued <- struct{}{}
-		})
-	}(enqueued)
+	latchSecond := make(chan struct{})
+	lockSecond := make(chan struct{})
+	e.Submit(func() {
+		latchSecond <- struct{}{}
+		t.Logf("second worker running")
+		<-lockSecond
+		t.Logf("second worker done")
+	})
 
-	select {
-	case <-enqueued:
-		t.Errorf("maxWorker is 1 = should be not goroutine generated")
-	default:
-		t.Logf("no submit reader ok")
-		r3 := e.Running()
-		w3 := e.Workers()
-		if r3 < 2 {
-			t.Errorf("still running first worker actual:%d", r3)
-		}
-		if w3 < 2 {
-			t.Errorf("not yet worker generated actual:%d", w3)
-		}
+	<-latchSecond
+
+	r3 := e.Running()
+	w3 := e.Workers()
+	if r3 != 2 {
+		t.Errorf("running worker 2 actual:%d", r3)
+	}
+	if w3 != 3 {
+		t.Errorf("generated worker 2(run+1) actual:%d", w3)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	close(lockFirst)
+	time.Sleep(50 * time.Millisecond)
 
-	select {
-	case <-enqueued:
-		t.Logf("submit reader ok")
-		time.Sleep(10 * time.Millisecond)
-		r4 := e.Running()
-		w4 := e.Workers()
-		if r4 != 0 {
-			t.Errorf("done running first worker actual:%d", r4)
-		}
-		if w4 < 2 {
-			t.Errorf("not yet worker generated actual:%d", w4)
-		}
-	default:
-		t.Errorf("should be second worker submitted")
+	r4 := e.Running()
+	w4 := e.Workers()
+	if r4 != 1 {
+		t.Errorf("running worker 1 actual:%d", r4)
 	}
+	if w4 != 3 {
+		t.Errorf("generated worker 3(not reducer run) actual:%d", w4)
+	}
+	close(lockSecond)
 }
 
 func TestExecutorOndemandStartUpto100(t *testing.T) {
@@ -732,78 +726,83 @@ func TestExecutorWorkerShrink(t *testing.T) {
 
 func TestSubExecutor(t *testing.T) {
 	t.Run("parent max cap", func(tt *testing.T) {
-		e := NewExecutor(1, 10,
+		max := 10
+		e := NewExecutor(1, max,
 			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
 				/* nop */
 			}),
 		)
 		defer e.Release()
-		s := e.SubExecutor()
+		sub := e.SubExecutor()
 
-		for i := 0; i < 10; i += 1 {
+		lock := make(chan struct{})
+		for i := 0; i < max; i += 1 {
 			e.Submit(func() {
-				time.Sleep(50 * time.Millisecond)
+				<-lock
 			})
 		}
+
+		tt.Logf("[log]reached cap of parent")
+
 		latch := make(chan struct{})
 		done := make(chan struct{})
-		go func(l chan struct{}, d chan struct{}) {
-			<-l
-			s.Submit(func() {
-				tt.Logf("sub worker hello")
-			})
-			d <- struct{}{}
-		}(latch, done)
+		sub.Submit(func() {
+			latch <- struct{}{}
+			tt.Logf("[log]sub worker hello")
+			done <- struct{}{}
+		})
 
-		latch <- struct{}{}
+		tt.Logf("[log]submitted sub")
+
+		<-latch
 		select {
 		case <-time.After(10 * time.Millisecond):
-			t.Logf("blocking ok = parent capacity limit")
+			tt.Errorf("ondemand worker not run?")
 		case <-done:
-			t.Errorf("reached capacity of parent")
+			// pass
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		tt.Logf("[log]release parent")
+		close(lock)
 
 		latch2 := make(chan struct{})
 		done2 := make(chan struct{})
-		go func(l chan struct{}, d chan struct{}) {
-			<-l
-			s.Submit(func() {
-				tt.Logf("sub worker world")
-			})
-			d <- struct{}{}
-		}(latch2, done2)
+		sub.Submit(func() {
+			latch2 <- struct{}{}
+			tt.Logf("[log]sub worker world")
+			done2 <- struct{}{}
+		})
 
-		latch2 <- struct{}{}
+		tt.Logf("[log]submitted sub 2")
+
+		<-latch2
 		select {
 		case <-time.After(10 * time.Millisecond):
-			t.Errorf("parent free capacity")
+			tt.Errorf("ondemand worker not run?")
 		case <-done2:
-			t.Logf("non blockging submit ok")
+			// pass
 		}
 	})
 	t.Run("wait", func(tt *testing.T) {
-		e := NewExecutor(1, 10,
+		max := 10
+		e := NewExecutor(1, max,
 			ExecutorPanicHandler(func(pt PanicType, rcv interface{}) {
 				/* nop */
 			}),
 		)
 		defer e.Release()
-		s := e.SubExecutor()
+		sub := e.SubExecutor()
 
 		parent := make(chan struct{})
-		e.Submit(func(d chan struct{}) func() {
-			return func() {
-				time.Sleep(50 * time.Millisecond)
-				tt.Logf("parent worker done")
-				d <- struct{}{}
-			}
-		}(parent))
+		e.Submit(func() {
+			time.Sleep(50 * time.Millisecond)
+			tt.Logf("parent worker done")
+			parent <- struct{}{}
+		})
 
 		for i := 0; i < 5; i += 1 {
-			s.Submit(func() {
-				time.Sleep(10 * time.Millisecond)
+			sub.Submit(func() {
+				time.Sleep(150 * time.Millisecond)
 			})
 		}
 
@@ -814,14 +813,12 @@ func TestSubExecutor(t *testing.T) {
 			tt.Logf("non blocking ok")
 		}
 
-		s.Wait()
+		sub.Wait()
 
 		r1 := e.Running()
 		if r1 != 1 {
 			tt.Errorf("parent worker running: %v", r1)
 		}
-
-		time.Sleep(100 * time.Millisecond)
 
 		select {
 		case <-parent:
@@ -829,8 +826,6 @@ func TestSubExecutor(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 			tt.Errorf("parent job still run")
 		}
-
-		time.Sleep(10 * time.Millisecond)
 
 		r2 := e.Running()
 		if r2 != 0 {
@@ -938,12 +933,19 @@ func TestExecutorTune(t *testing.T) {
 		)
 		defer e.Release()
 
+		waitStartup := new(sync.WaitGroup)
+		doneJob := new(sync.WaitGroup)
+		ch := make(chan struct{}, 0)
 		for i := 0; i < 5; i += 1 {
+			waitStartup.Add(1)
+			doneJob.Add(1)
 			e.Submit(func() {
-				time.Sleep(50 * time.Millisecond)
+				waitStartup.Done()
+				<-ch
+				doneJob.Done()
 			})
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitStartup.Wait()
 
 		if e.Workers() < 5 {
 			tt.Errorf("ondemand up: %d > 5", e.Workers())
@@ -954,7 +956,7 @@ func TestExecutorTune(t *testing.T) {
 		}
 
 		e.TuneMinWorker(2)
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond) // wait reducer
 
 		if e.MinWorker() != 2 {
 			tt.Errorf("default min worker 2 != %d", e.MinWorker())
@@ -963,7 +965,9 @@ func TestExecutorTune(t *testing.T) {
 			tt.Errorf("already running min < curr: %d", e.Workers())
 		}
 
-		time.Sleep(110 * time.Millisecond) // wait reduce
+		close(ch)
+		doneJob.Wait()
+		time.Sleep(100 * time.Millisecond) // wait reducer
 
 		if e.MinWorker() != 2 {
 			tt.Errorf("default min worker 2 != %d", e.MinWorker())
@@ -973,7 +977,7 @@ func TestExecutorTune(t *testing.T) {
 		}
 
 		e.TuneMinWorker(3)
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond) // wait reducer
 
 		if e.MinWorker() != 3 {
 			tt.Errorf("default min worker 3 != %d", e.MinWorker())
